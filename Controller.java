@@ -15,6 +15,7 @@ public class Controller {
   int timeout;
   int rebalancePeriod;
   Hashtable<InetAddress, Integer> dstores = new Hashtable<>();
+  Hashtable<InetAddress, String> index = new Hashtable<>();
 
   public static void main(String[] args) {
     final int cport = Integer.parseInt(args[0]);
@@ -24,6 +25,13 @@ public class Controller {
     Controller server = new Controller(cport, R, timeout, rebalancePeriod);
   }
 
+  /**
+   * Makes the connection server
+   * @param cport The port to recieve on
+   * @param R The number of Dstores require to rebalance
+   * @param timeout The time in seconds to timeout
+   * @param rebalancePeriod The duration in seconds to rebalance files
+   */
   private Controller(int cport, int R, int timeout, int rebalancePeriod) {
     this.cport = cport;
     this.R = R;
@@ -48,7 +56,7 @@ public class Controller {
           new Thread(new Runnable(){
             public void run(){
               int port;
-              InetAddress dstoreAddress = client.getInetAddress();
+              InetAddress address = client.getInetAddress();
               try{
                 BufferedReader in = new BufferedReader(
                 new InputStreamReader(client.getInputStream()));
@@ -58,14 +66,29 @@ public class Controller {
                   String[] splitIn = line.split(" ");
                   if (splitIn[0].equals("JOIN")) {
                     port = Integer.parseInt(splitIn[1]);
-                    dstores.put(dstoreAddress, port);
+                    dstores.put(address, port);
+                  } else if (splitIn[0].equals("LIST") && dstores.containsKey(address)) {
+                    String files = "";
+                    try {
+                      for (int i = 1 ; i < splitIn.length -1; i++ ) {
+                        files += splitIn[i] + " ";
+                      }
+                    } catch (Exception e) {
+                      files += splitIn[splitIn.length - 1];
+                    }
+                    try {
+                    index.remove(address);
+                    } catch (Exception e) {}
+
+                    index.put(address, files);
+                    logger.info("Files " + files + " added for " + address);
                   }
                 }
                 
                 client.close();
               }catch(Exception e){
                 try {
-                  dstores.remove(dstoreAddress);
+                  dstores.remove(address);
                   logger.info("Removed a Dstore");
                 } catch (Exception ee) {}
               }
@@ -76,16 +99,26 @@ public class Controller {
     }catch(Exception e){logger.info("error "+e);}
   }
 
+  /**
+   * Send a text message to the specified target
+   * @param destinationAddress The target address
+   * @param destinationPort The target port
+   * @param msg The message to be sent
+   */
   private void sendMsg(InetAddress destinationAddress, int destinationPort, String msg) {
     try{
       Socket socket = new Socket(destinationAddress, destinationPort);
       PrintWriter out = new PrintWriter(socket.getOutputStream());
       out.println(msg); out.flush();
       logger.info("TCP message "+msg+" sent");
+      socket.close();
 
     }catch(Exception e){logger.info("error"+e);}
   }
 
+  /**
+   * Controlls the Dstores when rebalencing
+   */
   public void rebalance() {
     if (dstores.size() >= R) {
       for (InetAddress address : dstores.keySet() ) {
