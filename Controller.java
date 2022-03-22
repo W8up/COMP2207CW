@@ -1,6 +1,6 @@
 import java.io.*;
 import java.net.*;
-
+import java.util.ArrayList;
 import java.util.Hashtable;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -14,8 +14,9 @@ public class Controller {
   int R;
   int timeout;
   int rebalancePeriod;
-  Hashtable<InetAddress, Integer> dstores = new Hashtable<>();
-  Hashtable<InetAddress, String> index = new Hashtable<>();
+  Hashtable<Integer, Socket> dstores = new Hashtable<>();
+  Hashtable<Integer, ArrayList<String>> fileLocations = new Hashtable<>();
+  Hashtable<String, Boolean> index = new Hashtable<>();
 
   public static void main(String[] args) {
     final int cport = Integer.parseInt(args[0]);
@@ -53,9 +54,10 @@ public class Controller {
       for(;;){
         try{
           final Socket client = ss.accept();
+          logger.info("New connection");
           new Thread(new Runnable(){
-            public void run(){
-              int port;
+            public void run() {
+              int port = 0;
               InetAddress address = client.getInetAddress();
               try{
                 BufferedReader in = new BufferedReader(
@@ -66,30 +68,81 @@ public class Controller {
                   String[] splitIn = line.split(" ");
                   if (splitIn[0].equals("JOIN")) {
                     port = Integer.parseInt(splitIn[1]);
-                    dstores.put(address, port);
-                  } else if (splitIn[0].equals("LIST") && dstores.containsKey(address)) {
-                    String files = "";
+                    dstores.put(port, client);
+
+                  //LIST from Dstore
+                  } else if (splitIn[0].equals("LIST") && port != 0) {
+                    ArrayList<String> files = new ArrayList<>();
                     try {
                       for (int i = 1 ; i < splitIn.length -1; i++ ) {
-                        files += splitIn[i] + " ";
+                        index.put(splitIn[i], false);
+                        files.add(splitIn[i]);
                       }
                     } catch (Exception e) {
-                      files += splitIn[splitIn.length - 1];
+                      index.put(splitIn[splitIn.length - 1], false);
+                      files.add(splitIn[splitIn.length - 1]);
                     }
                     try {
-                    index.remove(address);
+                    fileLocations.remove(port);
                     } catch (Exception e) {}
 
-                    index.put(address, files);
-                    logger.info("Files " + files + " added for " + address);
+                    fileLocations.put(port, files);
+                    logger.info("Files " + files + " added for " + port);
+
+                  //STORE from client
+                  } else if (splitIn[0].equals("STORE")) {
+                    String fileName = splitIn[1];
+                    if (index.get(fileName) != null) {
+                      while (index.get(fileName)) {}
+                    }
+                    index.put(fileName, true);
+                    float balanceNumber = (R * index.size())/dstores.size();
+                    String toSend = "STORE_TO";
+
+                    for (int c = 0; c < R; c++) {
+                      for (Integer p : dstores.keySet()) {
+                        try {
+                          if (fileLocations.get(p).size() < balanceNumber && !fileLocations.get(p).contains(fileName)) {
+                            fileLocations.get(p).add(fileName);
+                            toSend += " " + p;
+                            logger.info("File " + fileName + " added to " + p);
+                            break;
+                          }
+                        } catch (Exception e) {
+                          ArrayList<String> file = new ArrayList<>();
+                          file.add(fileName);
+                          fileLocations.put(p, file);
+                          toSend += " " + p;
+                          logger.info("File " + fileName + " added to " + p);
+                          break;
+                        }
+                      }
+                    }
+                    sendMsg(client, toSend);
+
+                  //LIST from Client
+                  } else if (splitIn[0].equals("LIST")) {
+                    logger.info("LIST from Client");
+                    String toSend = "LIST";
+                    for (String i : index.keySet()) {
+                      if (!index.get(i)) {
+                        toSend += " " + i;
+                      }
+                    }
+                    sendMsg(client, toSend);
                   }
                 }
                 
-                client.close();
               }catch(Exception e){
+                logger.info(e.getMessage());
                 try {
-                  dstores.remove(address);
-                  logger.info("Removed a Dstore");
+                  if (port != 0) {
+                    dstores.remove(port);
+                    fileLocations.remove(port);
+                    logger.info("Removed a Dstore");
+                  } else {
+                    logger.info("connection closed");
+                  }
                 } catch (Exception ee) {}
               }
             }
@@ -105,13 +158,11 @@ public class Controller {
    * @param destinationPort The target port
    * @param msg The message to be sent
    */
-  private void sendMsg(InetAddress destinationAddress, int destinationPort, String msg) {
+  private void sendMsg(Socket socket, String msg) {
     try{
-      Socket socket = new Socket(destinationAddress, destinationPort);
       PrintWriter out = new PrintWriter(socket.getOutputStream());
       out.println(msg); out.flush();
       logger.info("TCP message "+msg+" sent");
-      socket.close();
 
     }catch(Exception e){logger.info("error"+e);}
   }
@@ -121,8 +172,8 @@ public class Controller {
    */
   public void rebalance() {
     if (dstores.size() >= R) {
-      for (InetAddress address : dstores.keySet() ) {
-        this.sendMsg(address, dstores.get(address), "LIST");
+      for (int port : dstores.keySet() ) {
+        this.sendMsg(dstores.get(port), "LIST");
       }
     } else {
       logger.info("Not enougth Dstores");

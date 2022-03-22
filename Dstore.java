@@ -23,12 +23,10 @@ public class Dstore {
 
       //Receiving
       try{
-        ServerSocket ss = new ServerSocket(port);
         for(;;){
           try{
-            Socket controller = ss.accept();
             BufferedReader in = new BufferedReader(
-            new InputStreamReader(controller.getInputStream()));
+            new InputStreamReader(socket.getInputStream()));
             String line;
             while((line = in.readLine()) != null) {
               logger.info(line+" received");
@@ -42,11 +40,9 @@ public class Dstore {
                 logger.info(msgToSend + " sent");
               }
             }
-            controller.close();
           }catch(Exception e){logger.info("error "+e);}
         }
       }catch(Exception e){logger.info("error "+e);}
-      Thread.sleep(1000);
     }catch(Exception e){logger.info("error"+e);}
   }
 }
