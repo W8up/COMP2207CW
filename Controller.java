@@ -73,14 +73,14 @@ public class Controller {
                   //LIST from Dstore
                   } else if (splitIn[0].equals("LIST") && port != 0) {
                     ArrayList<String> files = new ArrayList<>();
-                    try {
-                      for (int i = 1 ; i < splitIn.length -1; i++ ) {
-                        index.put(splitIn[i], false);
-                        files.add(splitIn[i]);
-                      }
-                    } catch (Exception e) {
-                      index.put(splitIn[splitIn.length - 1], false);
-                      files.add(splitIn[splitIn.length - 1]);
+                    for (int i = 1 ; i < splitIn.length; i++ ) {
+                      Boolean p = false;
+                      try{
+                        p = index.get(splitIn[i]);
+                      } catch (Exception e) {}
+                      
+                      index.put(splitIn[i], p);
+                      files.add(splitIn[i]);
                     }
                     try {
                     fileLocations.remove(port);
@@ -153,15 +153,14 @@ public class Controller {
   }
 
   /**
-   * Send a text message to the specified target
-   * @param destinationAddress The target address
-   * @param destinationPort The target port
-   * @param msg The message to be sent
+   * Send a text message to the specified socket
+   * @param socket
+   * @param msg
    */
   private void sendMsg(Socket socket, String msg) {
     try{
-      PrintWriter out = new PrintWriter(socket.getOutputStream());
-      out.println(msg); out.flush();
+      PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+      out.println(msg);
       logger.info("TCP message "+msg+" sent");
 
     }catch(Exception e){logger.info("error"+e);}
