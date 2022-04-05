@@ -80,7 +80,7 @@ public class Controller {
                       } catch (Exception e) {}
                       
                       index.put(splitIn[i], p);
-                      files.add(splitIn[i]);
+                      if (!p) {files.add(splitIn[i]);}
                     }
                     try {
                     fileLocations.remove(port);
@@ -94,10 +94,11 @@ public class Controller {
                     String fileName = splitIn[1];
                     if (index.get(fileName) != null) {
                       sendMsg(client, "ERROR_FILE_ALREADY_EXISTS");
+                    } else if (dstores.size() < R) {
+                      sendMsg(client, "ERROR_NOT_ENOUGH_DSTORES");
                     } else {
                       index.put(fileName, true);
                       float balanceNumber = (R * index.size())/dstores.size();
-                      logger.info("Balance number " + balanceNumber);
                       String toSend = "STORE_TO";
                       ArrayList<Socket> ports = new ArrayList<>();
 
@@ -125,14 +126,26 @@ public class Controller {
                       sendMsg(client, toSend);
                       locks.put(fileName, 0);
                       logger.info("Thread paused");
+                      long startTime = System.currentTimeMillis();
                       while (true) {
-                        if (locks.get(fileName).equals(R)){
+                        if (locks.get(fileName) == R){
+                          sendMsg(client, "STORE_COMPLETE");
+                          index.put(fileName, false);
+                          logger.info("Index updated for " + fileName);
+                          break;
+                        } else if (System.currentTimeMillis()-startTime >= timeout) {
+                          logger.info("STORE timeout");
+                          for (Integer files : fileLocations.keySet()) {
+                            try {
+                              if (fileLocations.get(files).contains(fileName)) {
+                                sendMsg(dstores.get(files), "REMOVE " + fileName);
+                              }
+                            } catch (Exception e) {}
+                          }
                           break;
                         }
                       }
-                      sendMsg(client, "STORE_COMPLETE");
-                      index.put(fileName, false);
-                      logger.info("Index updated for " + fileName);
+                      
                     }
                   //LIST from Client
                   } else if (splitIn[0].equals("LIST")) {
