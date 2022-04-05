@@ -18,6 +18,7 @@ public class Controller {
   Hashtable<Integer, ArrayList<String>> fileLocations = new Hashtable<>();
   Hashtable<String, Boolean> index = new Hashtable<>();
   Hashtable<String, Integer> locks = new Hashtable<>();
+  Hashtable<String, String> fileSizes = new Hashtable<>();
 
   public static void main(String[] args) {
     final int cport = Integer.parseInt(args[0]);
@@ -92,12 +93,14 @@ public class Controller {
                   //STORE from client
                   } else if (splitIn[0].equals("STORE")) {
                     String fileName = splitIn[1];
+                    String fileSize = splitIn[2];
                     if (index.get(fileName) != null) {
                       sendMsg(client, "ERROR_FILE_ALREADY_EXISTS");
                     } else if (dstores.size() < R) {
                       sendMsg(client, "ERROR_NOT_ENOUGH_DSTORES");
                     } else {
                       index.put(fileName, true);
+                      fileSizes.put(fileName, fileSize);
                       float balanceNumber = (R * index.size())/dstores.size();
                       String toSend = "STORE_TO";
                       ArrayList<Socket> ports = new ArrayList<>();
@@ -164,6 +167,36 @@ public class Controller {
                         logger.info("ACK incremented");
                       }
                     } catch (Exception e) {logger.info("error " + e.getMessage());}
+
+                    //LOAD from Client
+                  } else if (splitIn[0].equals("LOAD") || splitIn[0].equals("RELOAD")) { 
+                    String fileToLoad = splitIn[1];
+                    Boolean type = !splitIn[0].equals("RELOAD");
+                    if (dstores.size() >= R) {
+                      try {
+                        if (!index.get(fileToLoad)) {
+                          for (Integer store : fileLocations.keySet()) {
+                            if (fileLocations.get(store).contains(fileToLoad)) {
+                              if (type) {
+                                sendMsg(client, "LOAD_FROM " + store + " " + fileSizes.get(fileToLoad));
+                                break;
+                              } else {
+                                type = true;
+                                fileLocations.get(store).remove(fileToLoad);
+                              }
+                            }
+                            sendMsg(client, "ERROR_LOAD");
+                          }
+                          
+                        } else {sendMsg(client, "FILE_DOES_NOT_EXIST");}
+                      } catch (NullPointerException e) {
+                        sendMsg(client, "FILE_DOES_NOT_EXIST");
+                      }
+                    } else {
+                      sendMsg(client, "NOT_ENOUGH_DSTORES");
+                    }
+                  } else {
+                    logger.info("Malformated message");
                   }
                 }
                 

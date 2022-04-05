@@ -75,6 +75,11 @@ public class Dstore {
                     out.close();
                     filesStored.add(fileName);
                     sendMsg(toServer, "STORE_ACK " + fileName);
+
+                    //LOAD_DATA to Client
+                  } else if (splitIn[0].equals("LOAD_DATA")) {
+                    if (!filesStored.contains(splitIn[1])) {client.close();}
+                    sendFile(client, splitIn[1]);
                   }
                 }
               } catch (Exception e) {
@@ -129,5 +134,18 @@ public class Dstore {
       logger.info("TCP message "+msg+" sent");
 
     }catch(Exception e){logger.info("error"+e);}
+  }
+
+  private void sendFile(Socket socket, String fileName) {
+    try {
+      File inputFile = new File(dir, fileName);
+      FileInputStream inputStream = new FileInputStream(inputFile);
+      DataOutputStream dataOut = new DataOutputStream(socket.getOutputStream());
+
+      byte[] fileContent = new byte[(int) inputFile.length()];
+      inputStream.read(fileContent);
+      dataOut.write(fileContent);
+      logger.info(fileName + " file sent");
+    } catch (Exception e) {logger.info("error " + e.getMessage());}
   }
 }
