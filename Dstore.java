@@ -80,7 +80,7 @@ public class Dstore {
                   } else if (splitIn[0].equals("LOAD_DATA")) {
                     if (!filesStored.contains(splitIn[1])) {client.close();}
                     sendFile(client, splitIn[1]);
-                  }
+                  } 
                 }
               } catch (Exception e) {
                 logger.info("Exception caught " + e.getMessage());
@@ -119,6 +119,16 @@ public class Dstore {
                   msgToSend += " " + file;
                 }
                 sendMsg(toServer, msgToSend);
+
+                //REMOVE
+              } else if (splitIn[0].equals("REMOVE")) {
+                String fileName = splitIn[1];
+                File toRemove = new File(dir, fileName);
+                
+                toRemove.delete();
+                filesStored.remove(fileName);
+                logger.info("File " + fileName + " removed");
+                sendMsg(toServer, "REMOVE_ACK " + fileName);
               }
             }
           }catch(Exception e){logger.info("error "+e);}

@@ -17,7 +17,8 @@ public class Controller {
   Hashtable<Integer, Socket> dstores = new Hashtable<>();
   Hashtable<Integer, ArrayList<String>> fileLocations = new Hashtable<>();
   Hashtable<String, Boolean> index = new Hashtable<>();
-  Hashtable<String, Integer> locks = new Hashtable<>();
+  Hashtable<String, Integer> locksS = new Hashtable<>();
+  Hashtable<String, Integer> locksR = new Hashtable<>();
   Hashtable<String, String> fileSizes = new Hashtable<>();
 
   public static void main(String[] args) {
@@ -108,7 +109,7 @@ public class Controller {
                       for (int c = 0; c < R; c++) {
                         for (Integer p : dstores.keySet()) {
                           try {
-                            if (fileLocations.get(p).size() + 1 <= Math.ceil(balanceNumber) && fileLocations.get(p).size() < Math.floor(balanceNumber) && !fileLocations.get(p).contains(fileName)) {
+                            if (fileLocations.get(p).size() <= Math.ceil(balanceNumber) && fileLocations.get(p).size() <= Math.floor(balanceNumber) && !fileLocations.get(p).contains(fileName)) {
                               fileLocations.get(p).add(fileName);
                               ports.add(dstores.get(p));
                               toSend += " " + p;
@@ -126,30 +127,25 @@ public class Controller {
                           }
                         }
                       }
+                      locksS.put(fileName, 0);
                       sendMsg(client, toSend);
-                      locks.put(fileName, 0);
                       logger.info("Thread paused");
                       long startTime = System.currentTimeMillis();
                       while (true) {
-                        if (locks.get(fileName) == R){
+                        if (locksS.get(fileName) == R){
                           sendMsg(client, "STORE_COMPLETE");
                           index.put(fileName, false);
                           logger.info("Index updated for " + fileName);
                           break;
                         } else if (System.currentTimeMillis()-startTime >= timeout) {
                           logger.info("STORE timeout");
-                          for (Integer files : fileLocations.keySet()) {
-                            try {
-                              if (fileLocations.get(files).contains(fileName)) {
-                                sendMsg(dstores.get(files), "REMOVE " + fileName);
-                              }
-                            } catch (Exception e) {}
-                          }
+                          index.remove(fileName);
+                          locksS.remove(fileName);
                           break;
                         }
                       }
-                      
                     }
+
                   //LIST from Client
                   } else if (splitIn[0].equals("LIST")) {
                     logger.info("LIST from Client");
@@ -160,12 +156,23 @@ public class Controller {
                       }
                     }
                     sendMsg(client, toSend);
+
+                    //STORE ACK from dstore
                   } else if (splitIn[0].equals("STORE_ACK")) {
                     try {
-                      synchronized (locks.get(splitIn[1])) {
-                        locks.put(splitIn[1], locks.get(splitIn[1]) + 1);
-                        logger.info("ACK incremented");
+                      synchronized (locksS.get(splitIn[1])) {
+                        locksS.put(splitIn[1], locksS.get(splitIn[1]) + 1);
                       }
+                      logger.info("ACK S incremented");
+                    } catch (Exception e) {logger.info("error " + e.getMessage());}
+
+                    //REMOVE ACK from dstore
+                  } else if (splitIn[0].equals("REMOVE_ACK")) {
+                    try {
+                      synchronized (locksR.get(splitIn[1])) {
+                        locksR.put(splitIn[1], locksR.get(splitIn[1]) + 1);
+                      }
+                      logger.info("ACK R incremented");
                     } catch (Exception e) {logger.info("error " + e.getMessage());}
 
                     //LOAD from Client
@@ -194,6 +201,38 @@ public class Controller {
                       }
                     } else {
                       sendMsg(client, "NOT_ENOUGH_DSTORES");
+                    }
+
+                    //REMOVE from client
+                  } else if (splitIn[0].equals("REMOVE")) {
+                    String fileName = splitIn[1];
+                    try {
+                      if (!index.get(fileName)) {
+                        locksR.put(fileName, 0);
+                        for (Integer p : fileLocations.keySet()) {
+                          if (fileLocations.get(p).contains(fileName)) {
+                            sendMsg(dstores.get(p), "REMOVE " + fileName);
+                          }
+                        }
+                        logger.info("Thread paused");
+                        long startTime = System.currentTimeMillis();
+                        while (true) {
+                          if (locksR.get(fileName) == R){
+                            sendMsg(client, "REMOVE_COMPLETE");
+                            index.put(fileName, false);
+                            logger.info("Index updated for " + fileName);
+                            break;
+                          } else if (System.currentTimeMillis()-startTime >= timeout) {
+                            logger.info("REMOVE timeout");
+                            index.put(fileName, false);
+                            break;
+                          }
+                        }
+                      } else {
+                        sendMsg(client, "ERROR_FILE_DOES_NOT_EXIST");
+                      }
+                    } catch (NullPointerException e) {
+                      sendMsg(client, "ERROR_FILE_DOES_NOT_EXIST");
                     }
                   } else {
                     logger.info("Malformated message");
