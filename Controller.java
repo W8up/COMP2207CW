@@ -17,6 +17,7 @@ public class Controller {
   Hashtable<Integer, Socket> dstores = new Hashtable<>();
   Hashtable<Integer, ArrayList<String>> fileLocations = new Hashtable<>();
   Hashtable<String, Boolean> index = new Hashtable<>();
+  Hashtable<String, Integer> locks = new Hashtable<>();
 
   public static void main(String[] args) {
     final int cport = Integer.parseInt(args[0]);
@@ -58,7 +59,6 @@ public class Controller {
           new Thread(new Runnable(){
             public void run() {
               int port = 0;
-              InetAddress address = client.getInetAddress();
               try{
                 BufferedReader in = new BufferedReader(
                 new InputStreamReader(client.getInputStream()));
@@ -93,33 +93,47 @@ public class Controller {
                   } else if (splitIn[0].equals("STORE")) {
                     String fileName = splitIn[1];
                     if (index.get(fileName) != null) {
-                      while (index.get(fileName)) {}
-                    }
-                    index.put(fileName, true);
-                    float balanceNumber = (R * index.size())/dstores.size();
-                    String toSend = "STORE_TO";
+                      sendMsg(client, "ERROR_FILE_ALREADY_EXISTS");
+                    } else {
+                      index.put(fileName, true);
+                      float balanceNumber = (R * index.size())/dstores.size();
+                      logger.info("Balance number " + balanceNumber);
+                      String toSend = "STORE_TO";
+                      ArrayList<Socket> ports = new ArrayList<>();
 
-                    for (int c = 0; c < R; c++) {
-                      for (Integer p : dstores.keySet()) {
-                        try {
-                          if (fileLocations.get(p).size() < balanceNumber && !fileLocations.get(p).contains(fileName)) {
-                            fileLocations.get(p).add(fileName);
+                      for (int c = 0; c < R; c++) {
+                        for (Integer p : dstores.keySet()) {
+                          try {
+                            if (fileLocations.get(p).size() + 1 <= Math.ceil(balanceNumber) && fileLocations.get(p).size() < Math.floor(balanceNumber) && !fileLocations.get(p).contains(fileName)) {
+                              fileLocations.get(p).add(fileName);
+                              ports.add(dstores.get(p));
+                              toSend += " " + p;
+                              logger.info("File " + fileName + " added to " + p);
+                              break;
+                            }
+                          } catch (Exception e) {
+                            ArrayList<String> file = new ArrayList<>();
+                            file.add(fileName);
+                            fileLocations.put(p, file);
+                            ports.add(dstores.get(p));
                             toSend += " " + p;
                             logger.info("File " + fileName + " added to " + p);
                             break;
                           }
-                        } catch (Exception e) {
-                          ArrayList<String> file = new ArrayList<>();
-                          file.add(fileName);
-                          fileLocations.put(p, file);
-                          toSend += " " + p;
-                          logger.info("File " + fileName + " added to " + p);
+                        }
+                      }
+                      sendMsg(client, toSend);
+                      locks.put(fileName, 0);
+                      logger.info("Thread paused");
+                      while (true) {
+                        if (locks.get(fileName).equals(R)){
                           break;
                         }
                       }
+                      sendMsg(client, "STORE_COMPLETE");
+                      index.put(fileName, false);
+                      logger.info("Index updated for " + fileName);
                     }
-                    sendMsg(client, toSend);
-
                   //LIST from Client
                   } else if (splitIn[0].equals("LIST")) {
                     logger.info("LIST from Client");
@@ -130,6 +144,13 @@ public class Controller {
                       }
                     }
                     sendMsg(client, toSend);
+                  } else if (splitIn[0].equals("STORE_ACK")) {
+                    try {
+                      synchronized (locks.get(splitIn[1])) {
+                        locks.put(splitIn[1], locks.get(splitIn[1]) + 1);
+                        logger.info("ACK incremented");
+                      }
+                    } catch (Exception e) {logger.info("error " + e.getMessage());}
                   }
                 }
                 
@@ -141,7 +162,7 @@ public class Controller {
                     fileLocations.remove(port);
                     logger.info("Removed a Dstore");
                   } else {
-                    logger.info("connection closed");
+                    logger.info("Connection closed");
                   }
                 } catch (Exception ee) {}
               }
@@ -191,5 +212,4 @@ class ServerTimerTask extends TimerTask {
   public void run() {
     c.rebalance();
   }
-  
 }

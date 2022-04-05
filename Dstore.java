@@ -13,6 +13,7 @@ public class Dstore {
   String fileFolder;
   ArrayList<String> filesStored;
   Socket toServer;
+  File dir;
 
   public static void main(String[] args) {
     final int port = Integer.valueOf(args[0]);
@@ -29,6 +30,10 @@ public class Dstore {
     this.timeout = timeout;
     this.fileFolder = fileFolder;
     this.filesStored = filesStored;
+    this.dir = new File(fileFolder);
+    try {
+      dir.mkdirs();
+    } catch (Exception e) {logger.info("error " + e.getMessage());}
 
     new Thread(new Runnable(){
       public void run() {
@@ -57,7 +62,7 @@ public class Dstore {
                     int size = Integer.valueOf(splitIn[2]);
                     byte[] fileBuffer = new byte[size];
                     int buflen;
-                    File outputFile = new File(fileName);
+                    File outputFile = new File(dir, fileName);
                     FileOutputStream out = new FileOutputStream(outputFile);
                     InputStream fileInStream = client.getInputStream();
                     logger.info("filename: " + fileName);
