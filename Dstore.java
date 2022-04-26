@@ -33,6 +33,10 @@ public class Dstore {
     this.dir = new File(fileFolder);
     try {
       dir.mkdirs();
+      File[] files = dir.listFiles();
+      for (File f : files) {
+        f.delete();
+      }
     } catch (Exception e) {logger.info("error " + e.getMessage());}
 
     new Thread(new Runnable(){
@@ -57,7 +61,7 @@ public class Dstore {
                 while((line = in.readLine()) != null) {
                   logger.info(line + " received");
                   String[] splitIn = line.split(" ");
-                  if (splitIn[0].equals("STORE")) {
+                  if (splitIn[0].equals("STORE") || splitIn[0].equals("REBALANCE_STORE")) {
                     String fileName = splitIn[1];
                     int size = Integer.valueOf(splitIn[2]);
                     byte[] fileBuffer = new byte[size];
@@ -68,7 +72,6 @@ public class Dstore {
                     logger.info("filename: " + fileName);
                     sendMsg(client, "ACK");
                     while ((buflen=fileInStream.read(fileBuffer)) != -1){
-                      System.out.print("*");
                       out.write(fileBuffer,0,buflen);
                     }
                     fileInStream.close();
