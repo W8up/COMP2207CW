@@ -201,8 +201,16 @@ public class Controller {
         logger.info("ACK R " + splitIn[1] + " decremented");
       } catch (Exception e) {logger.info("error " + e.getMessage());}
 
+      //ERROR_FILE_DOES_NOT_EXIST from Dstore
+    } else if (splitIn[0].equals("ERROR_FILE_DOES_NOT_EXIST")) {
+      try {
+        locksR.get(splitIn[1]).countDown();
+        fileLocations.get(port).remove(splitIn[1]);
+        logger.info("ACK R " + splitIn[1] + " decremented file does not exist");
+      } catch (Exception e) {logger.info("error " + e.getMessage());}
+
       //LOAD from Client
-    } else if (splitIn[0].equals("LOAD") || splitIn[0].equals("RELOAD")) { 
+    }else if (splitIn[0].equals("LOAD") || splitIn[0].equals("RELOAD")) { 
       String fileToLoad = splitIn[1];
       Boolean type = !splitIn[0].equals("RELOAD");
       if (dstores.size() >= R) {
@@ -226,39 +234,43 @@ public class Controller {
           sendMsg(client, "FILE_DOES_NOT_EXIST");
         }
       } else {
-        sendMsg(client, "NOT_ENOUGH_DSTORES");
+        sendMsg(client, "ERROR_NOT_ENOUGH_DSTORES");
       }
 
       //REMOVE from client
     } else if (splitIn[0].equals("REMOVE")) {
       String fileName = splitIn[1];
-      try {
-        if (!index.get(fileName)) {
-          CountDownLatch countDown = new CountDownLatch(R);
-          locksR.put(fileName, countDown);
-          for (Integer p : fileLocations.keySet()) {
-            if (fileLocations.get(p).contains(fileName)) {
-              sendMsg(dstores.get(p), "REMOVE " + fileName);
+      if (dstores.size() >= R) {
+        try {
+          if (!index.get(fileName)) {
+            CountDownLatch countDown = new CountDownLatch(R);
+            locksR.put(fileName, countDown);
+            for (Integer p : fileLocations.keySet()) {
+              if (fileLocations.get(p).contains(fileName)) {
+                sendMsg(dstores.get(p), "REMOVE " + fileName);
+              }
             }
+            
+            logger.info("Thread paused");
+            try {
+              if (countDown.await(timeout, TimeUnit.MILLISECONDS)) {
+                sendMsg(client, "REMOVE_COMPLETE");
+                index.remove(fileName);
+                locksR.remove(fileName);
+                logger.info("Index removed for " + fileName);
+              } else {
+                logger.info("REMOVE " + fileName +" timeout " + countDown.getCount());
+                locksR.remove(fileName);
+              }
+            } catch (Exception e) {logger.info("error " + e.getMessage());}
+          } else {
+            sendMsg(client, "ERROR_FILE_DOES_NOT_EXIST");
           }
-          
-          logger.info("Thread paused");
-          try {
-            if (countDown.await(timeout, TimeUnit.MILLISECONDS)) {
-              sendMsg(client, "REMOVE_COMPLETE");
-              index.remove(fileName);
-              locksR.remove(fileName);
-              logger.info("Index removed for " + fileName);
-            } else {
-              logger.info("REMOVE " + fileName +" timeout " + countDown.getCount());
-              locksR.remove(fileName);
-            }
-          } catch (Exception e) {logger.info("error " + e.getMessage());}
-        } else {
+        } catch (NullPointerException e) {
           sendMsg(client, "ERROR_FILE_DOES_NOT_EXIST");
         }
-      } catch (NullPointerException e) {
-        sendMsg(client, "ERROR_FILE_DOES_NOT_EXIST");
+      } else {
+        sendMsg(client, "ERROR_NOT_ENOUGH_DSTORES");
       }
     } else {
       logger.info("Malformated message");

@@ -126,12 +126,17 @@ public class Dstore {
                 //REMOVE
               } else if (splitIn[0].equals("REMOVE")) {
                 String fileName = splitIn[1];
-                File toRemove = new File(dir, fileName);
-                
-                toRemove.delete();
-                filesStored.remove(fileName);
-                logger.info("File " + fileName + " removed");
-                sendMsg(toServer, "REMOVE_ACK " + fileName);
+                if (filesStored.contains(fileName)) {
+                  File toRemove = new File(dir, fileName);
+                  
+                  toRemove.delete();
+                  filesStored.remove(fileName);
+                  logger.info("File " + fileName + " removed");
+                  sendMsg(toServer, "REMOVE_ACK " + fileName);
+                } else {
+                  sendMsg(toServer, "ERROR_FILE_DOES_NOT_EXIST " + fileName);
+                  logger.info("File " + fileName + " is not stored");
+                }
               }
             }
           }catch(Exception e){logger.info("error "+e);}
