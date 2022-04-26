@@ -61,6 +61,7 @@ public class Controller {
       for(;;){
         try{
           final Socket client = ss.accept();
+          Hashtable<String, ArrayList<Integer>> loadTries = new Hashtable<>();
           logger.info("New connection");
           new Thread(new Runnable(){
             public void run() {
@@ -76,7 +77,7 @@ public class Controller {
                     port = Integer.parseInt(splitIn[1]);
                     dstores.put(port, client);
                   } else {
-                    new Thread(new TextRunnable(port, line, main, client) {}).start();
+                    new Thread(new TextRunnable(port, line, main, client, loadTries) {}).start();
                   }
                 }
                 
@@ -99,7 +100,7 @@ public class Controller {
     }catch(Exception e){logger.info("error "+e);}
   }
 
-  public void textProcessing(String line, int port, Socket client) {
+  public void textProcessing(String line, int port, Socket client, Hashtable<String, ArrayList<Integer>> loadTries) {
     
     String[] splitIn = line.split(" ");
     String command = splitIn[0];
@@ -208,23 +209,23 @@ public class Controller {
         break;
       case "LOAD":
       case "RELOAD":
-        String fileToLoad = splitIn[1];
-        Boolean type = !splitIn[0].equals("RELOAD");
+      String fileToLoad = splitIn[1];
+      Boolean notFoundFlag = true;
         if (dstores.size() >= R) {
           try {
             if (!index.get(fileToLoad)) {
-              for (Integer store : fileLocations.keySet()) {
-                if (fileLocations.get(store).contains(fileToLoad)) {
-                  if (type) {
-                    sendMsg(client, "LOAD_FROM " + store + " " + fileSizes.get(fileToLoad));
-                    break;
-                  } else {
-                    type = true;
-                    fileLocations.get(store).remove(fileToLoad);
-                  }
-                }
-                sendMsg(client, "ERROR_LOAD");
+              if (splitIn[0].equals("LOAD")) {
+                loadTries.put(fileToLoad, new ArrayList<>());
               }
+              for (Integer store : fileLocations.keySet()) {
+                if (fileLocations.get(store).contains(fileToLoad) && !loadTries.get(fileToLoad).contains(store)) {
+                  sendMsg(client, "LOAD_FROM " + store + " " + fileSizes.get(fileToLoad));
+                  loadTries.get(fileToLoad).add(store);
+                  notFoundFlag = false;
+                  break;
+                }
+              }
+              if (notFoundFlag) {sendMsg(client, "ERROR_LOAD");}
               
             } else {sendMsg(client, "FILE_DOES_NOT_EXIST");}
           } catch (NullPointerException e) {
@@ -321,16 +322,18 @@ class TextRunnable implements Runnable {
   public String line;
   public Controller c;
   public Socket client;
+  public Hashtable<String, ArrayList<Integer>> loadTries;
 
-  TextRunnable(int port, String line, Controller thread, Socket client) {
+  TextRunnable(int port, String line, Controller thread, Socket client, Hashtable<String, ArrayList<Integer>> loadTries) {
     this.port = port;
     this.line = line;
     this.c = thread;
     this.client = client;
+    this.loadTries = loadTries;
   }
 
   @Override
   public void run() {
-    c.textProcessing(line, port, client);
+    c.textProcessing(line, port, client, loadTries);
   }
 }
