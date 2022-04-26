@@ -61,10 +61,10 @@ public class Controller {
       for(;;){
         try{
           final Socket client = ss.accept();
-          Hashtable<String, ArrayList<Integer>> loadTries = new Hashtable<>();
           logger.info("New connection");
           new Thread(new Runnable(){
             public void run() {
+              Hashtable<String, ArrayList<Integer>> loadTries = new Hashtable<>();
               int port = 0;
               try{
                 BufferedReader in = new BufferedReader(
