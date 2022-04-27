@@ -76,6 +76,7 @@ public class Controller {
                   if (splitIn[0].equals("JOIN")) {
                     port = Integer.parseInt(splitIn[1]);
                     dstores.put(port, client);
+                    fileLocations.put(port, new ArrayList<String>());
                   } else {
                     new Thread(new TextRunnable(port, line, main, client, loadTries) {}).start();
                   }
@@ -114,11 +115,13 @@ public class Controller {
               p = index.get(splitIn[i]);
             } catch (Exception e) {}
             
-            index.put(splitIn[i], p);
-            if (!p) {files.add(splitIn[i]);}
+            if (p != null) {
+              index.put(splitIn[i], p);
+            }
+            files.add(splitIn[i]);
           }
           try {
-          fileLocations.remove(port);
+            fileLocations.remove(port);
           } catch (Exception e) {}
 
           fileLocations.put(port, files);
@@ -144,28 +147,20 @@ public class Controller {
         } else {
           index.put(fileName, true);
           fileSizes.put(fileName, fileSize);
-          float balanceNumber = (R * index.size())/dstores.size();
+          double balanceNumber = (R * index.size())/dstores.size();
           String toSend = "STORE_TO";
-          ArrayList<Socket> ports = new ArrayList<>();
 
           for (int c = 0; c < R; c++) {
             for (Integer p : dstores.keySet()) {
               try {
-                if (fileLocations.get(p).size() <= Math.ceil(balanceNumber) && fileLocations.get(p).size() <= Math.floor(balanceNumber) && !fileLocations.get(p).contains(fileName)) {
+                if (fileLocations.get(p).size() <= Math.floor(balanceNumber) && !fileLocations.get(p).contains(fileName)) {
                   fileLocations.get(p).add(fileName);
-                  ports.add(dstores.get(p));
                   toSend += " " + p;
                   logger.info("File " + fileName + " added to " + p);
                   break;
                 }
               } catch (Exception e) {
-                ArrayList<String> file = new ArrayList<>();
-                file.add(fileName);
-                fileLocations.put(p, file);
-                ports.add(dstores.get(p));
-                toSend += " " + p;
-                logger.info("File " + fileName + " added to " + p);
-                break;
+                logger.info("error " + e.getMessage());
               }
             }
           }
@@ -197,6 +192,7 @@ public class Controller {
       case "REMOVE_ACK":
         try {
           locksR.get(splitIn[1]).countDown();
+          fileLocations.get(port).remove(splitIn[1]);
           logger.info("ACK R " + splitIn[1] + " decremented");
         } catch (Exception e) {logger.info("error " + e.getMessage());}
         break;
@@ -240,6 +236,7 @@ public class Controller {
         if (dstores.size() >= R) {
           try {
             if (!index.get(fileName)) {
+              index.put(fileName, true);
               CountDownLatch countDown = new CountDownLatch(R);
               locksR.put(fileName, countDown);
               for (Integer p : fileLocations.keySet()) {
