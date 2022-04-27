@@ -129,10 +129,11 @@ public class Dstore {
                 if (filesStored.contains(fileName)) {
                   File toRemove = new File(dir, fileName);
                   
-                  toRemove.delete();
-                  filesStored.remove(fileName);
-                  logger.info("File " + fileName + " removed");
-                  sendMsg(toServer, "REMOVE_ACK " + fileName);
+                  if (toRemove.delete()) {
+                    filesStored.remove(fileName);
+                    logger.info("File " + fileName + " removed");
+                    sendMsg(toServer, "REMOVE_ACK " + fileName);
+                  }
                 } else {
                   sendMsg(toServer, "ERROR_FILE_DOES_NOT_EXIST " + fileName);
                   logger.info("File " + fileName + " is not stored");
@@ -150,7 +151,6 @@ public class Dstore {
       PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
       out.println(msg);
       logger.info("TCP message "+msg+" sent");
-
     }catch(Exception e){logger.info("error"+e);}
   }
 
@@ -164,6 +164,7 @@ public class Dstore {
       inputStream.read(fileContent);
       dataOut.write(fileContent);
       logger.info(fileName + " file sent");
+      inputStream.close();
     } catch (Exception e) {logger.info("error " + e.getMessage());}
   }
 }

@@ -22,7 +22,7 @@ public class Controller {
   Hashtable<String, CountDownLatch> locksS = new Hashtable<>();
   Hashtable<String, CountDownLatch> locksR = new Hashtable<>();
   Hashtable<String, String> fileSizes = new Hashtable<>();
-  Object rebalence = new Object();
+  Boolean balancing = false;
 
   public static void main(String[] args) {
     final int cport = Integer.parseInt(args[0]);
@@ -110,14 +110,6 @@ public class Controller {
         if (port != 0) {
           ArrayList<String> files = new ArrayList<>();
           for (int i = 1 ; i < splitIn.length; i++ ) {
-            Boolean p = false;
-            try{
-              p = index.get(splitIn[i]);
-            } catch (Exception e) {}
-            
-            if (p != null) {
-              index.put(splitIn[i], p);
-            }
             files.add(splitIn[i]);
           }
           try {
@@ -127,6 +119,7 @@ public class Controller {
           fileLocations.put(port, files);
           logger.info("Files " + files + " added for " + port);
         } else {
+          while (balancing){}
           logger.info("LIST from Client");
           String toSend = "LIST";
           for (String i : index.keySet()) {
@@ -138,12 +131,13 @@ public class Controller {
         }
         break;
       case "STORE":
+        while (balancing){}
         String fileName = splitIn[1];
         String fileSize = splitIn[2];
-        if (index.get(fileName) != null) {
-          sendMsg(client, "ERROR_FILE_ALREADY_EXISTS");
-        } else if (dstores.size() < R) {
+        if (dstores.size() < R) {
           sendMsg(client, "ERROR_NOT_ENOUGH_DSTORES");
+        } else if (index.get(fileName) != null) {
+          sendMsg(client, "ERROR_FILE_ALREADY_EXISTS"); 
         } else {
           index.put(fileName, true);
           fileSizes.put(fileName, fileSize);
@@ -154,7 +148,7 @@ public class Controller {
             for (Integer p : dstores.keySet()) {
               try {
                 if (fileLocations.get(p).size() <= Math.floor(balanceNumber) && !fileLocations.get(p).contains(fileName)) {
-                  fileLocations.get(p).add(fileName);
+                  fileLocations.get(p).add(fileName);      
                   toSend += " " + p;
                   logger.info("File " + fileName + " added to " + p);
                   break;
@@ -205,8 +199,9 @@ public class Controller {
         break;
       case "LOAD":
       case "RELOAD":
-      String fileToLoad = splitIn[1];
-      Boolean notFoundFlag = true;
+        while (balancing){}
+        String fileToLoad = splitIn[1];
+        Boolean notFoundFlag = true;
         if (dstores.size() >= R) {
           try {
             if (!index.get(fileToLoad)) {
@@ -232,6 +227,7 @@ public class Controller {
         }
         break;
       case "REMOVE":
+        while (balancing){}
         fileName = splitIn[1];
         if (dstores.size() >= R) {
           try {
@@ -251,6 +247,7 @@ public class Controller {
                   sendMsg(client, "REMOVE_COMPLETE");
                   index.remove(fileName);
                   locksR.remove(fileName);
+                  fileSizes.remove(fileName);
                   logger.info("Index removed for " + fileName);
                 } else {
                   logger.info("REMOVE " + fileName +" timeout " + countDown.getCount());
@@ -290,19 +287,21 @@ public class Controller {
    * Controlls the Dstores when rebalencing
    */
   public void rebalance() {
-    synchronized (rebalence) {
-      logger.info("has Lock");
-      for (Integer s : dstores.keySet()) {
-        sendMsg(dstores.get(s), "LIST");
-      }
-      rebalence.notifyAll();
-      logger.info("lock done");
+    balancing = true;
+    while (index.contains(true)) {}
+    for (Integer s : dstores.keySet()) {
+      sendMsg(dstores.get(s), "LIST");
     }
+    double balanceNumber = (R * index.size())/dstores.size();
+    int floor = Math.floor(balanceNumber);
+    int ceil = Math.ceil(balanceNumber);
+    balancing = false;
   }
 }
 
 class ServerTimerTask extends TimerTask {
   private Controller c;
+  private Boolean balancingL = false;
 
   ServerTimerTask(Controller c) {
     this.c = c;
@@ -310,7 +309,12 @@ class ServerTimerTask extends TimerTask {
 
   @Override
   public void run() {
-    c.rebalance();
+    
+    if (!balancingL) {
+      balancingL = true;
+      c.rebalance();
+      balancingL = false;
+    }
   }
 }
 
