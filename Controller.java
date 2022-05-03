@@ -23,6 +23,7 @@ public class Controller {
   Hashtable<String, CountDownLatch> locksR = new Hashtable<>();
   Hashtable<String, String> fileSizes = new Hashtable<>();
   Boolean balancing = false;
+  CountDownLatch rebaLatch;
 
   public static void main(String[] args) {
     final int cport = Integer.parseInt(args[0]);
@@ -77,6 +78,7 @@ public class Controller {
                     port = Integer.parseInt(splitIn[1]);
                     dstores.put(port, client);
                     fileLocations.put(port, new ArrayList<String>());
+                    rebalance();
                   } else {
                     new Thread(new TextRunnable(port, line, main, client, loadTries) {}).start();
                   }
@@ -118,6 +120,9 @@ public class Controller {
 
           fileLocations.put(port, files);
           logger.info("Files " + files + " added for " + port);
+          rebaLatch.countDown();
+        } else if (dstores.size() < R) {
+          sendMsg(client, "ERROR_NOT_ENOUGH_DSTORES");
         } else {
           while (balancing){}
           logger.info("LIST from Client");
@@ -148,7 +153,7 @@ public class Controller {
             for (Integer p : dstores.keySet()) {
               try {
                 if (fileLocations.get(p).size() <= Math.floor(balanceNumber) && !fileLocations.get(p).contains(fileName)) {
-                  fileLocations.get(p).add(fileName);      
+                  fileLocations.get(p).add(fileName);   
                   toSend += " " + p;
                   logger.info("File " + fileName + " added to " + p);
                   break;
@@ -286,15 +291,77 @@ public class Controller {
   /**
    * Controlls the Dstores when rebalencing
    */
+  //look to fill not to be filled
   public void rebalance() {
     balancing = true;
-    while (index.contains(true)) {}
-    for (Integer s : dstores.keySet()) {
-      sendMsg(dstores.get(s), "LIST");
+    if (dstores.size() >= R) {
+      while (index.contains(true)) {}
+      for (Integer s : dstores.keySet()) {
+        sendMsg(dstores.get(s), "LIST");
+      }
+      rebaLatch = new CountDownLatch(dstores.size());
+      try {
+        if (rebaLatch.await(timeout, TimeUnit.MILLISECONDS)) {
+          double balanceNumber = (R * index.size())/dstores.size();
+          double floor = Math.floor(balanceNumber);
+          double ceil = Math.ceil(balanceNumber);
+          Hashtable<String, Integer> seen = new Hashtable<>();  
+          ArrayList<Integer> balanced = new ArrayList<>();
+          for (Integer d : fileLocations.keySet()) {
+            if (fileLocations.get(d).size() >= floor && fileLocations.get(d).size() <= ceil) {
+              balanced.add(d);
+              logger.info("BALANCED: " + balanced.toString());
+            }
+            for (String f : fileLocations.get(d)) {
+              if (seen.get(f) != null) {
+                seen.put(f, seen.get(f) + 1);
+              } else {seen.put(f, 1);}
+            }
+          }
+          for (Integer d : balanced) {
+            Hashtable<String, ArrayList<Integer>> send = new Hashtable<>();
+            Integer count = 0;
+            for (String f : fileLocations.get(d)) {
+              if (seen.get(f) < R) {
+                for (Integer dSearch : fileLocations.keySet()) {
+                  if (seen.get(f) >= R) {break;}
+                  if (!balanced.contains(dSearch) && !fileLocations.get(dSearch).contains(f)) {
+                    fileLocations.get(dSearch).add(f);
+                    seen.put(f, seen.get(f) + 1);
+                    ArrayList<Integer> tempStoreList = send.get(f);
+                    if (tempStoreList != null) {
+                      tempStoreList.add(dSearch);
+                      send.put(f, tempStoreList);
+                    } else {
+                      tempStoreList = new ArrayList<>();
+                      tempStoreList.add(dSearch); 
+                      send.put(f, tempStoreList);
+                    }
+                    if (fileLocations.get(dSearch).size() >= floor) {
+                      balanced.add(dSearch);
+                    }
+                  }
+                }
+              }
+            }
+            String message = "";
+            for (String f : send.keySet()) {
+              count += 1;
+              String files = "";
+              message += " " + f;
+              Integer noDStores = 0;
+              for (Integer ds : send.get(f)) {
+                noDStores += 1;
+                files += " " + ds;
+              }
+              message += " " + noDStores + files;
+            }
+            if (!send.isEmpty()) {sendMsg(dstores.get(d), "REBALANCE " + count + message);}
+          }       
+        }
+      }catch (Exception e) {logger.info("error " + e.getMessage());}
+      
     }
-    double balanceNumber = (R * index.size())/dstores.size();
-    int floor = Math.floor(balanceNumber);
-    int ceil = Math.ceil(balanceNumber);
     balancing = false;
   }
 }
@@ -319,11 +386,11 @@ class ServerTimerTask extends TimerTask {
 }
 
 class TextRunnable implements Runnable {
-  public int port;
-  public String line;
-  public Controller c;
-  public Socket client;
-  public Hashtable<String, ArrayList<Integer>> loadTries;
+  private int port;
+  private String line;
+  private Controller c;
+  private Socket client;
+  private Hashtable<String, ArrayList<Integer>> loadTries;
 
   TextRunnable(int port, String line, Controller thread, Socket client, Hashtable<String, ArrayList<Integer>> loadTries) {
     this.port = port;

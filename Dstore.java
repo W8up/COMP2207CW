@@ -50,6 +50,7 @@ public class Dstore {
       for(;;){
         try{
           final Socket client = ss.accept();
+          client.setSoTimeout(timeout);
           logger.info("New connection");
           new Thread(new Runnable(){
             public void run() {
@@ -138,6 +139,19 @@ public class Dstore {
                   sendMsg(toServer, "ERROR_FILE_DOES_NOT_EXIST " + fileName);
                   logger.info("File " + fileName + " is not stored");
                 }
+              } else if (splitIn[0].equals("REBALANCE")) {
+                Integer noOfFiles = Integer.valueOf(splitIn[1]);
+                String fileName = splitIn[2];
+                Integer noOfStores = Integer.valueOf(splitIn[3]);
+                ArrayList<Integer> dStores = new ArrayList<>();
+                Integer offset = 3;
+                for (int i = 1; i <= noOfStores; i++) {
+                  offset += 1;
+                  dStores.add(Integer.valueOf(splitIn[offset]));
+                }
+                
+              } else {
+                logger.info("Malformed message recived: " +line);
               }
             }
           }catch(Exception e){logger.info("error "+e);}
