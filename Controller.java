@@ -1,6 +1,8 @@
 import java.io.*;
 import java.net.*;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Hashtable;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -22,8 +24,10 @@ public class Controller {
   Hashtable<String, CountDownLatch> locksS = new Hashtable<>();
   Hashtable<String, CountDownLatch> locksR = new Hashtable<>();
   Hashtable<String, String> fileSizes = new Hashtable<>();
+  ArrayList<Integer> lastDStore = new ArrayList<>();
   Boolean balancing = false;
   CountDownLatch rebaLatch;
+  CountDownLatch rebaCompLatch;
 
   public static void main(String[] args) {
     final int cport = Integer.parseInt(args[0]);
@@ -78,6 +82,9 @@ public class Controller {
                     port = Integer.parseInt(splitIn[1]);
                     dstores.put(port, client);
                     fileLocations.put(port, new ArrayList<String>());
+                    Collections.reverse(lastDStore);
+                    lastDStore.add(port);
+                    Collections.reverse(lastDStore);
                     rebalance();
                   } else {
                     new Thread(new TextRunnable(port, line, main, client, loadTries) {}).start();
@@ -90,6 +97,7 @@ public class Controller {
                   if (port != 0) {
                     dstores.remove(port);
                     fileLocations.remove(port);
+                    lastDStore.remove(port);
                     logger.info("Removed a Dstore");
                   } else {
                     logger.info("Connection closed");
@@ -120,7 +128,9 @@ public class Controller {
 
           fileLocations.put(port, files);
           logger.info("Files " + files + " added for " + port);
-          rebaLatch.countDown();
+          try {
+            rebaLatch.countDown();
+          } catch (NullPointerException e) {}
         } else if (dstores.size() < R) {
           sendMsg(client, "ERROR_NOT_ENOUGH_DSTORES");
         } else {
@@ -150,10 +160,12 @@ public class Controller {
           String toSend = "STORE_TO";
 
           for (int c = 0; c < R; c++) {
-            for (Integer p : dstores.keySet()) {
+            for (Integer p : lastDStore) {
               try {
-                if (fileLocations.get(p).size() <= Math.floor(balanceNumber) && !fileLocations.get(p).contains(fileName)) {
-                  fileLocations.get(p).add(fileName);   
+                if (fileLocations.get(p).size() <= Math.floor(balanceNumber) && fileLocations.get(p).size() <= Math.ceil(balanceNumber) && !fileLocations.get(p).contains(fileName)) {
+                  fileLocations.get(p).add(fileName);
+                  lastDStore.remove(p);
+                  lastDStore.add(p);  
                   toSend += " " + p;
                   logger.info("File " + fileName + " added to " + p);
                   break;
@@ -269,6 +281,9 @@ public class Controller {
           sendMsg(client, "ERROR_NOT_ENOUGH_DSTORES");
         }
         break;
+      case "REBALANCE_COMPLETE":
+        rebaCompLatch.countDown();
+        break;
       default:
         logger.info("Malformated message");
     }
@@ -307,6 +322,7 @@ public class Controller {
           double ceil = Math.ceil(balanceNumber);
           Hashtable<String, Integer> seen = new Hashtable<>();  
           ArrayList<Integer> balanced = new ArrayList<>();
+          ArrayList<Integer> source = new ArrayList<>();
           for (Integer d : fileLocations.keySet()) {
             if (fileLocations.get(d).size() >= floor && fileLocations.get(d).size() <= ceil) {
               balanced.add(d);
@@ -315,33 +331,43 @@ public class Controller {
             for (String f : fileLocations.get(d)) {
               if (seen.get(f) != null) {
                 seen.put(f, seen.get(f) + 1);
-              } else {seen.put(f, 1);}
+              } else {
+                seen.put(f, 1);
+                source.add(d);
+              }
             }
           }
-          for (Integer d : balanced) {
+          source.addAll(balanced);
+          HashSet<Integer> toTry = new HashSet<>(source);
+          for (Integer d : toTry) {
             Hashtable<String, ArrayList<Integer>> send = new Hashtable<>();
             Integer count = 0;
             for (String f : fileLocations.get(d)) {
               if (seen.get(f) < R) {
-                for (Integer dSearch : fileLocations.keySet()) {
+                for (Integer dSearch : lastDStore) {
                   if (seen.get(f) >= R) {break;}
-                  if (!balanced.contains(dSearch) && !fileLocations.get(dSearch).contains(f)) {
-                    fileLocations.get(dSearch).add(f);
-                    seen.put(f, seen.get(f) + 1);
-                    ArrayList<Integer> tempStoreList = send.get(f);
-                    if (tempStoreList != null) {
-                      tempStoreList.add(dSearch);
-                      send.put(f, tempStoreList);
-                    } else {
-                      tempStoreList = new ArrayList<>();
-                      tempStoreList.add(dSearch); 
-                      send.put(f, tempStoreList);
-                    }
-                    if (fileLocations.get(dSearch).size() >= floor) {
-                      balanced.add(dSearch);
+                  if (!balanced.contains(dSearch) && fileLocations.get(dSearch) != null) {
+                    if (!fileLocations.get(dSearch).contains(f)) {
+                      fileLocations.get(dSearch).add(f);
+                      seen.put(f, seen.get(f) + 1);
+                      ArrayList<Integer> tempStoreList = send.get(f);
+                      if (tempStoreList != null) {
+                        tempStoreList.add(dSearch);
+                        send.put(f, tempStoreList);
+                      } else {
+                        tempStoreList = new ArrayList<>();
+                        tempStoreList.add(dSearch); 
+                        send.put(f, tempStoreList);
+                      }
+                      if (fileLocations.get(dSearch).size() >= floor) {
+                        balanced.add(dSearch);
+                      }
                     }
                   }
                 }
+                Integer tempInt = lastDStore.get(0);
+                lastDStore.remove(tempInt);
+                lastDStore.add(tempInt);
               }
             }
             String message = "";
@@ -356,7 +382,11 @@ public class Controller {
               }
               message += " " + noDStores + files;
             }
-            if (!send.isEmpty()) {sendMsg(dstores.get(d), "REBALANCE " + count + message);}
+            if (!send.isEmpty()) {
+              rebaCompLatch = new CountDownLatch(1);
+              sendMsg(dstores.get(d), "REBALANCE " + count + message);
+              if (rebaCompLatch.await(timeout, TimeUnit.MILLISECONDS)) {}
+            }
           }       
         }
       }catch (Exception e) {logger.info("error " + e.getMessage());}

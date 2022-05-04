@@ -1,6 +1,9 @@
 import java.io.*;
 import java.net.*;
 import java.util.ArrayList;
+import java.util.Hashtable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 
 public class Dstore {
@@ -14,6 +17,8 @@ public class Dstore {
   ArrayList<String> filesStored;
   Socket toServer;
   File dir;
+  Hashtable<String, Integer> fileSizes = new Hashtable<>();
+  CountDownLatch wait;
 
   public static void main(String[] args) {
     final int port = Integer.valueOf(args[0]);
@@ -75,16 +80,21 @@ public class Dstore {
                     while ((buflen=fileInStream.read(fileBuffer)) != -1){
                       out.write(fileBuffer,0,buflen);
                     }
+                    filesStored.add(fileName);
+                    fileSizes.put(fileName, size);
                     fileInStream.close();
                     out.close();
-                    filesStored.add(fileName);
-                    sendMsg(toServer, "STORE_ACK " + fileName);
+                    if (splitIn[0].equals("STORE")) {
+                      sendMsg(toServer, "STORE_ACK " + fileName);
+                    }
 
                     //LOAD_DATA to Client
                   } else if (splitIn[0].equals("LOAD_DATA")) {
                     if (!filesStored.contains(splitIn[1])) {client.close();}
                     sendFile(client, splitIn[1]);
-                  } 
+                  } else {
+                    logger.info("Malformed message recived: " + line);
+                  }
                 }
               } catch (Exception e) {
                 logger.info("Exception caught " + e.getMessage());
@@ -141,14 +151,53 @@ public class Dstore {
                 }
               } else if (splitIn[0].equals("REBALANCE")) {
                 Integer noOfFiles = Integer.valueOf(splitIn[1]);
-                String fileName = splitIn[2];
-                Integer noOfStores = Integer.valueOf(splitIn[3]);
-                ArrayList<Integer> dStores = new ArrayList<>();
-                Integer offset = 3;
-                for (int i = 1; i <= noOfStores; i++) {
+                Hashtable<String, ArrayList<Integer>> filesToSend = new Hashtable<>();
+                Integer offset = 2;
+                for (int c = 0; c < noOfFiles; c++) {
+                  String fileName = splitIn[offset];
                   offset += 1;
-                  dStores.add(Integer.valueOf(splitIn[offset]));
+                  Integer noOfStores = Integer.valueOf(splitIn[offset]);
+                  ArrayList<Integer> dStores = new ArrayList<>();
+                  for (int i = 1; i <= noOfStores; i++) {
+                    offset += 1;
+                    dStores.add(Integer.valueOf(splitIn[offset]));
+                  }
+                  offset += 1;
+                  filesToSend.put(fileName, dStores);
                 }
+
+              for (String f : filesToSend.keySet()) {
+                Integer fs = fileSizes.get(f);
+                for (Integer d : filesToSend.get(f)) {
+                  Socket dSock = new Socket(InetAddress.getLocalHost(), d);
+                  sendMsg(dSock, "REBALANCE_STORE " + f + " " + fs);
+                  wait = new CountDownLatch(1);
+                  new Thread(new Runnable(){
+                    public void run() {
+                      try{
+                        BufferedReader in2 = new BufferedReader(
+                        new InputStreamReader(dSock.getInputStream()));
+                        String line2;
+                        logger.info("msg");
+                        while((line2 = in2.readLine()) != null) {
+                          logger.info(line2 + " received");
+                          String[] splitIn2 = line2.split(" ");
+                          if (splitIn2[0].equals("ACK")) {
+                            wait.countDown();
+                          }
+                        }
+                      } catch (Exception e) {logger.info("error: " + e.getMessage());}
+                    }
+                  }).start();
+                  if (wait.await(timeout, TimeUnit.MILLISECONDS)) {
+                    sendFile(dSock, f);
+                  }
+                  dSock.close();
+                  sendMsg(toServer, "REBALANCE_COMPLETE");
+                  
+                }
+              }
+              logger.info("End");
                 
               } else {
                 logger.info("Malformed message recived: " +line);
