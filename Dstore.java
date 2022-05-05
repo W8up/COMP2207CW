@@ -166,38 +166,52 @@ public class Dstore {
                   filesToSend.put(fileName, dStores);
                 }
 
-              for (String f : filesToSend.keySet()) {
-                Integer fs = fileSizes.get(f);
-                for (Integer d : filesToSend.get(f)) {
-                  Socket dSock = new Socket(InetAddress.getLocalHost(), d);
-                  sendMsg(dSock, "REBALANCE_STORE " + f + " " + fs);
-                  wait = new CountDownLatch(1);
-                  new Thread(new Runnable(){
-                    public void run() {
-                      try{
-                        BufferedReader in2 = new BufferedReader(
-                        new InputStreamReader(dSock.getInputStream()));
-                        String line2;
-                        logger.info("msg");
-                        while((line2 = in2.readLine()) != null) {
-                          logger.info(line2 + " received");
-                          String[] splitIn2 = line2.split(" ");
-                          if (splitIn2[0].equals("ACK")) {
-                            wait.countDown();
+                for (String f : filesToSend.keySet()) {
+                  Integer fs = fileSizes.get(f);
+                  for (Integer d : filesToSend.get(f)) {
+                    Socket dSock = new Socket(InetAddress.getLocalHost(), d);
+                    sendMsg(dSock, "REBALANCE_STORE " + f + " " + fs);
+                    wait = new CountDownLatch(1);
+                    new Thread(new Runnable(){
+                      public void run() {
+                        try{
+                          BufferedReader in2 = new BufferedReader(
+                          new InputStreamReader(dSock.getInputStream()));
+                          String line2;
+                          logger.info("msg");
+                          while((line2 = in2.readLine()) != null) {
+                            logger.info(line2 + " received");
+                            String[] splitIn2 = line2.split(" ");
+                            if (splitIn2[0].equals("ACK")) {
+                              wait.countDown();
+                            }
                           }
-                        }
-                      } catch (Exception e) {logger.info("error: " + e.getMessage());}
+                        } catch (Exception e) {logger.info("error: " + e.getMessage());}
+                      }
+                    }).start();
+                    if (wait.await(timeout, TimeUnit.MILLISECONDS)) {
+                      sendFile(dSock, f);
                     }
-                  }).start();
-                  if (wait.await(timeout, TimeUnit.MILLISECONDS)) {
-                    sendFile(dSock, f);
+                    dSock.close();
                   }
-                  dSock.close();
-                  sendMsg(toServer, "REBALANCE_COMPLETE");
-                  
                 }
-              }
-              logger.info("End");
+                Integer noToRemove = Integer.valueOf(splitIn[offset]);
+                offset += 1;
+                for (int c = 0; c < noToRemove; c++) {
+                  if (filesStored.contains(splitIn[offset])) {
+                    File toRemove = new File(dir, splitIn[offset]);
+                    
+                    if (toRemove.delete()) {
+                      filesStored.remove(splitIn[offset]);
+                      logger.info("File " + splitIn[offset] + " removed");
+                    }
+                  } else {
+                    logger.info("File " + splitIn[offset] + " is not stored");
+                  }
+                  offset += 1;
+                }
+                sendMsg(toServer, "REBALANCE_COMPLETE");
+                logger.info("End");
                 
               } else {
                 logger.info("Malformed message recived: " +line);

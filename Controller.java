@@ -326,7 +326,7 @@ public class Controller {
           for (Integer d : fileLocations.keySet()) {
             if (fileLocations.get(d).size() >= floor && fileLocations.get(d).size() <= ceil) {
               balanced.add(d);
-              logger.info("BALANCED: " + balanced.toString());
+              //logger.info("BALANCED: " + balanced.toString());
             }
             for (String f : fileLocations.get(d)) {
               if (seen.get(f) != null) {
@@ -337,29 +337,40 @@ public class Controller {
               }
             }
           }
-          source.addAll(balanced);
           HashSet<Integer> toTry = new HashSet<>(source);
           for (Integer d : toTry) {
             Hashtable<String, ArrayList<Integer>> send = new Hashtable<>();
+            ArrayList<String> toRemove = new ArrayList<>();
             Integer count = 0;
             for (String f : fileLocations.get(d)) {
-              if (seen.get(f) < R) {
+              if (seen.get(f) != R && balanced.contains(d)) {
+                balanced.remove(d);
+              }
+              if (seen.get(f) > R || (fileLocations.get(d).size() - toRemove.size()) > ceil) {
+                if (!toRemove.contains(f)) {
+                  toRemove.add(f);
+                  seen.put(f, seen.get(f)-1);
+                }
+              }
+              if (!balanced.containsAll(dstores.keySet())) {
                 for (Integer dSearch : lastDStore) {
-                  if (seen.get(f) >= R) {break;}
-                  if (!balanced.contains(dSearch) && fileLocations.get(dSearch) != null) {
-                    if (!fileLocations.get(dSearch).contains(f)) {
-                      fileLocations.get(dSearch).add(f);
-                      seen.put(f, seen.get(f) + 1);
-                      ArrayList<Integer> tempStoreList = send.get(f);
-                      if (tempStoreList != null) {
-                        tempStoreList.add(dSearch);
-                        send.put(f, tempStoreList);
-                      } else {
-                        tempStoreList = new ArrayList<>();
-                        tempStoreList.add(dSearch); 
-                        send.put(f, tempStoreList);
+                  if (fileLocations.get(dSearch) != null && !d.equals(dSearch)) {
+                    if (seen.get(f) < R) {
+                      if (!fileLocations.get(dSearch).contains(f)) {
+                        fileLocations.get(dSearch).add(f);
+                        seen.put(f, seen.get(f) + 1);
+                        ArrayList<Integer> tempStoreList = send.get(f);
+                        if (tempStoreList != null) {
+                          tempStoreList.add(dSearch);
+                          send.put(f, tempStoreList);
+                        } else {
+                          tempStoreList = new ArrayList<>();
+                          tempStoreList.add(dSearch); 
+                          send.put(f, tempStoreList);
+                        }
+                        
                       }
-                      if (fileLocations.get(dSearch).size() >= floor) {
+                      if (fileLocations.get(dSearch).size() >= floor && fileLocations.get(dSearch).size() <= ceil && !balanced.contains(dSearch)) {
                         balanced.add(dSearch);
                       }
                     }
@@ -370,6 +381,7 @@ public class Controller {
                 lastDStore.add(tempInt);
               }
             }
+
             String message = "";
             for (String f : send.keySet()) {
               count += 1;
@@ -382,7 +394,14 @@ public class Controller {
               }
               message += " " + noDStores + files;
             }
-            if (!send.isEmpty()) {
+            Integer countR = 0;
+            String files = "";
+            for (String r : toRemove) {
+              countR += 1;
+              files += " " + r;
+            }
+            message += " " + countR + files;
+            if (!send.isEmpty() || !toRemove.isEmpty()) {
               rebaCompLatch = new CountDownLatch(1);
               sendMsg(dstores.get(d), "REBALANCE " + count + message);
               if (rebaCompLatch.await(timeout, TimeUnit.MILLISECONDS)) {}
