@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Hashtable;
+import java.util.Iterator;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.CountDownLatch;
@@ -308,9 +309,9 @@ public class Controller {
    */
   //look to fill not to be filled
   public void rebalance() {
+    while (index.contains(true)) {}
     balancing = true;
     if (dstores.size() >= R) {
-      while (index.contains(true)) {}
       for (Integer s : dstores.keySet()) {
         sendMsg(dstores.get(s), "LIST");
       }
@@ -338,7 +339,7 @@ public class Controller {
             }
           }
           HashSet<Integer> toTry = new HashSet<>(source);
-          for (Integer d : toTry) {
+          for (Integer d : dstores.keySet()) {
             Hashtable<String, ArrayList<Integer>> send = new Hashtable<>();
             ArrayList<String> toRemove = new ArrayList<>();
             Integer count = 0;
@@ -353,10 +354,12 @@ public class Controller {
                 }
               }
               if (!balanced.containsAll(dstores.keySet())) {
-                for (Integer dSearch : lastDStore) {
+                Iterator<Integer> it = lastDStore.iterator();
+                while (it.hasNext()) {
+                  Integer dSearch = it.next();
                   if (fileLocations.get(dSearch) != null && !d.equals(dSearch)) {
                     if (seen.get(f) < R) {
-                      if (!fileLocations.get(dSearch).contains(f)) {
+                      if (!fileLocations.get(dSearch).contains(f) && (fileLocations.get(dSearch).size() < ceil || !it.hasNext())) {
                         fileLocations.get(dSearch).add(f);
                         seen.put(f, seen.get(f) + 1);
                         ArrayList<Integer> tempStoreList = send.get(f);
@@ -376,9 +379,6 @@ public class Controller {
                     }
                   }
                 }
-                Integer tempInt = lastDStore.get(0);
-                lastDStore.remove(tempInt);
-                lastDStore.add(tempInt);
               }
             }
 
