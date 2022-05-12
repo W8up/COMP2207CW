@@ -90,11 +90,11 @@ public class Dstore {
                       while ((buflen=fileInStream.read(fileBuffer)) != -1){
                         out.write(fileBuffer,0,buflen);
                       }
-                      if (splitIn[0].equals("STORE")) {
-                        sendMsg(toServer, "STORE_ACK " + fileName);
-                      }
                       filesStored.add(fileName);
                       fileSizes.put(fileName, size);
+                      if (command.equals("STORE")) {
+                        sendMsg(toServer, "STORE_ACK " + fileName);
+                      }
                       fileInStream.close();
                       out.close();
                       break;

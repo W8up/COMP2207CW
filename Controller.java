@@ -86,7 +86,6 @@ public class Controller {
                     lastDStore.add(port);
                     Collections.reverse(lastDStore);
                     if (dstores.size() >= R) {
-                      Thread.sleep(5);
                       new Thread(task).start();
                     }
                   } else {
@@ -103,9 +102,9 @@ public class Controller {
                     lastDStore.remove(port);
                     logger.info("Removed a Dstore");
                   } else {
-                    client.close();
                     logger.info("Connection closed");
                   }
+                  client.close();
                 } catch (Exception ee) {}
               }
             }
@@ -166,7 +165,7 @@ public class Controller {
           for (int c = 0; c < R; c++) {
             for (Integer p : lastDStore) {
               try {
-                if (fileLocations.get(p).size() <= Math.floor(balanceNumber) && fileLocations.get(p).size() +1 <= Math.ceil(balanceNumber) && !fileLocations.get(p).contains(fileName)) {
+                if ((fileLocations.get(p).size() == Math.floor(balanceNumber) || fileLocations.get(p).size() < Math.ceil(balanceNumber))&& !fileLocations.get(p).contains(fileName)) {
                   fileLocations.get(p).add(fileName);
                   lastDStore.remove(p);
                   lastDStore.add(p);  
@@ -187,9 +186,10 @@ public class Controller {
           try {
             if (countDown.await(timeout, TimeUnit.MILLISECONDS)) {
               index.put(fileName, false);
+              sendMsg(client, "STORE_COMPLETE");
               locksS.remove(fileName);
               logger.info("Index updated for " + fileName);
-              sendMsg(client, "STORE_COMPLETE");
+              
             } else {
               logger.info("STORE " + fileName +" timeout " + countDown.getCount());
               index.remove(fileName);
@@ -314,7 +314,7 @@ public class Controller {
   public void rebalance() {
     while (index.contains(true)) {}
     balancing = true;
-    if (dstores.size() >= R) {
+    if (dstores.size() >= R || index.size() != 0) {
       for (Integer s : dstores.keySet()) {
         sendMsg(dstores.get(s), "LIST");
       }
@@ -358,10 +358,11 @@ public class Controller {
                 if (!index.keySet().contains(f)) {
                   toRemove.add(f);
                 } else if (!balanced.containsAll(dstores.keySet())) {
+                  Collections.shuffle(lastDStore);
                   Iterator<Integer> it = lastDStore.iterator();
                   while (it.hasNext()) {
                     Integer dSearch = it.next();
-                    if (fileLocations.get(dSearch) != null && !d.equals(dSearch) && !balanced.contains(dSearch)) {
+                    if (fileLocations.get(dSearch) != null && !d.equals(dSearch)) {
                       if (!toRemove.contains(f) && seen.get(f) >= R && (fileLocations.get(d).size() - toRemove.size()) > ceil && !fileLocations.get(dSearch).contains(f) && fileLocations.get(dSearch).size() < ceil) {
                         toRemove.add(f);
                         seen.put(f, seen.get(f)-1);
