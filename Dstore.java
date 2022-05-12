@@ -28,7 +28,14 @@ public class Dstore {
     ArrayList<String> filesStored = new ArrayList<>();
     Dstore dstore = new Dstore(port, cport, timeout, fileFolder, filesStored);
   }
-
+  /**
+   * Creates a Dstore to store files
+   * @param port to host on
+   * @param cport to connect to
+   * @param timeout duration ms
+   * @param fileFolder location to store files at
+   * @param filesStored files currently stored
+   */
   public Dstore(int port, int cport, int timeout, String fileFolder, ArrayList<String> filesStored) {
     this.port = port;
     this.cport = cport;
@@ -59,7 +66,7 @@ public class Dstore {
           logger.info("New connection");
           new Thread(new Runnable(){
             public void run() {
-              try{
+              try {
                 BufferedReader in = new BufferedReader(
                 new InputStreamReader(client.getInputStream()));
                 String line;
@@ -67,33 +74,36 @@ public class Dstore {
                 while((line = in.readLine()) != null) {
                   logger.info(line + " received");
                   String[] splitIn = line.split(" ");
-                  if (splitIn[0].equals("STORE") || splitIn[0].equals("REBALANCE_STORE")) {
-                    String fileName = splitIn[1];
-                    int size = Integer.valueOf(splitIn[2]);
-                    byte[] fileBuffer = new byte[size];
-                    int buflen;
-                    File outputFile = new File(dir, fileName);
-                    FileOutputStream out = new FileOutputStream(outputFile);
-                    InputStream fileInStream = client.getInputStream();
-                    logger.info("filename: " + fileName);
-                    sendMsg(client, "ACK");
-                    while ((buflen=fileInStream.read(fileBuffer)) != -1){
-                      out.write(fileBuffer,0,buflen);
-                    }
-                    filesStored.add(fileName);
-                    fileSizes.put(fileName, size);
-                    fileInStream.close();
-                    out.close();
-                    if (splitIn[0].equals("STORE")) {
-                      sendMsg(toServer, "STORE_ACK " + fileName);
-                    }
-
-                    //LOAD_DATA to Client
-                  } else if (splitIn[0].equals("LOAD_DATA")) {
-                    if (!filesStored.contains(splitIn[1])) {client.close();}
-                    sendFile(client, splitIn[1]);
-                  } else {
-                    logger.info("Malformed message recived: " + line);
+                  String command = splitIn[0];
+                  switch (command) {
+                    case "STORE":
+                    case "REBALANCE_STORE":
+                      String fileName = splitIn[1];
+                      int size = Integer.valueOf(splitIn[2]);
+                      byte[] fileBuffer = new byte[size];
+                      int buflen;
+                      File outputFile = new File(dir, fileName);
+                      FileOutputStream out = new FileOutputStream(outputFile);
+                      InputStream fileInStream = client.getInputStream();
+                      logger.info("filename: " + fileName);
+                      sendMsg(client, "ACK");
+                      while ((buflen=fileInStream.read(fileBuffer)) != -1){
+                        out.write(fileBuffer,0,buflen);
+                      }
+                      if (splitIn[0].equals("STORE")) {
+                        sendMsg(toServer, "STORE_ACK " + fileName);
+                      }
+                      filesStored.add(fileName);
+                      fileSizes.put(fileName, size);
+                      fileInStream.close();
+                      out.close();
+                      break;
+                    case "LOAD_DATA":
+                      if (!filesStored.contains(splitIn[1])) {client.close();}
+                      sendFile(client, splitIn[1]);
+                      break;
+                    default:
+                      logger.info("Malformed message recived: " + line);
                   }
                 }
               } catch (Exception e) {

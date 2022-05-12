@@ -68,13 +68,12 @@ public class Controller {
         try{
           final Socket client = ss.accept();
           logger.info("New connection");
-          new Thread(new Runnable(){
+          new Thread(new Runnable() {
             public void run() {
               Hashtable<String, ArrayList<Integer>> loadTries = new Hashtable<>();
               int port = 0;
               try{
-                BufferedReader in = new BufferedReader(
-                new InputStreamReader(client.getInputStream()));
+                BufferedReader in = new BufferedReader(new InputStreamReader(client.getInputStream()));
                 String line;
                 while((line = in.readLine()) != null) {
                   logger.info("Message recived: " + line);
@@ -86,13 +85,12 @@ public class Controller {
                     Collections.reverse(lastDStore);
                     lastDStore.add(port);
                     Collections.reverse(lastDStore);
-                    rebalance();
                   } else {
                     new Thread(new TextRunnable(port, line, main, client, loadTries) {}).start();
                   }
                 }
                 
-              }catch(Exception e){
+              } catch(Exception e) {
                 logger.info(e.getMessage());
                 try {
                   if (port != 0) {
@@ -107,9 +105,9 @@ public class Controller {
               }
             }
           }).start();
-        }catch(Exception e){logger.info("error "+e);}
+        } catch(Exception e) {logger.info("error "+e);}
       }
-    }catch(Exception e){logger.info("error "+e);}
+    } catch(Exception e) {logger.info("error "+e);}
   }
 
   public void textProcessing(String line, int port, Socket client, Hashtable<String, ArrayList<Integer>> loadTries) {
@@ -122,6 +120,7 @@ public class Controller {
           ArrayList<String> files = new ArrayList<>();
           for (int i = 1 ; i < splitIn.length; i++ ) {
             files.add(splitIn[i]);
+            index.put(splitIn[i], false);
           }
           try {
             fileLocations.remove(port);
@@ -183,10 +182,10 @@ public class Controller {
           logger.info("Thread paused");
           try {
             if (countDown.await(timeout, TimeUnit.MILLISECONDS)) {
-              sendMsg(client, "STORE_COMPLETE");
               index.put(fileName, false);
               locksS.remove(fileName);
               logger.info("Index updated for " + fileName);
+              sendMsg(client, "STORE_COMPLETE");
             } else {
               logger.info("STORE " + fileName +" timeout " + countDown.getCount());
               index.remove(fileName);
@@ -312,6 +311,7 @@ public class Controller {
     while (index.contains(true)) {}
     balancing = true;
     if (dstores.size() >= R) {
+      index.clear();
       for (Integer s : dstores.keySet()) {
         sendMsg(dstores.get(s), "LIST");
       }
@@ -323,22 +323,19 @@ public class Controller {
           double ceil = Math.ceil(balanceNumber);
           Hashtable<String, Integer> seen = new Hashtable<>();  
           ArrayList<Integer> balanced = new ArrayList<>();
-          ArrayList<Integer> source = new ArrayList<>();
           for (Integer d : fileLocations.keySet()) {
             if (fileLocations.get(d).size() >= floor && fileLocations.get(d).size() <= ceil) {
               balanced.add(d);
-              //logger.info("BALANCED: " + balanced.toString());
             }
             for (String f : fileLocations.get(d)) {
               if (seen.get(f) != null) {
                 seen.put(f, seen.get(f) + 1);
               } else {
                 seen.put(f, 1);
-                source.add(d);
               }
             }
           }
-          HashSet<Integer> toTry = new HashSet<>(source);
+
           for (Integer d : dstores.keySet()) {
             Hashtable<String, ArrayList<Integer>> send = new Hashtable<>();
             ArrayList<String> toRemove = new ArrayList<>();
@@ -347,17 +344,18 @@ public class Controller {
               if (seen.get(f) != R && balanced.contains(d)) {
                 balanced.remove(d);
               }
-              if (seen.get(f) > R || (fileLocations.get(d).size() - toRemove.size()) > ceil) {
-                if (!toRemove.contains(f)) {
-                  toRemove.add(f);
-                  seen.put(f, seen.get(f)-1);
-                }
-              }
+              
               if (!balanced.containsAll(dstores.keySet())) {
                 Iterator<Integer> it = lastDStore.iterator();
                 while (it.hasNext()) {
                   Integer dSearch = it.next();
-                  if (fileLocations.get(dSearch) != null && !d.equals(dSearch)) {
+                  if (fileLocations.get(dSearch) != null && !d.equals(dSearch) && !balanced.contains(dSearch)) {
+                    if (((seen.get(f) == R) || seen.get(f) > R) && (fileLocations.get(d).size() - toRemove.size()) > ceil) {
+                      if (!toRemove.contains(f)) {
+                        toRemove.add(f);
+                        seen.put(f, seen.get(f)-1);
+                      }
+                    }
                     if (seen.get(f) < R) {
                       if (!fileLocations.get(dSearch).contains(f) && (fileLocations.get(dSearch).size() < ceil || !it.hasNext())) {
                         fileLocations.get(dSearch).add(f);
@@ -379,6 +377,9 @@ public class Controller {
                     }
                   }
                 }
+              }
+              if (seen.get(f) == R && !balanced.contains(d)) {
+                balanced.add(d);
               }
             }
 
@@ -426,7 +427,7 @@ class ServerTimerTask extends TimerTask {
   @Override
   public void run() {
     
-    if (!balancingL) {
+    if (!balancingL && c.dstores.size() >= c.R) {
       balancingL = true;
       c.rebalance();
       balancingL = false;
