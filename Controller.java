@@ -85,6 +85,10 @@ public class Controller {
                     Collections.reverse(lastDStore);
                     lastDStore.add(port);
                     Collections.reverse(lastDStore);
+                    if (dstores.size() >= R) {
+                      Thread.sleep(5);
+                      new Thread(task).start();
+                    }
                   } else {
                     new Thread(new TextRunnable(port, line, main, client, loadTries) {}).start();
                   }
@@ -99,6 +103,7 @@ public class Controller {
                     lastDStore.remove(port);
                     logger.info("Removed a Dstore");
                   } else {
+                    client.close();
                     logger.info("Connection closed");
                   }
                 } catch (Exception ee) {}
@@ -120,7 +125,6 @@ public class Controller {
           ArrayList<String> files = new ArrayList<>();
           for (int i = 1 ; i < splitIn.length; i++ ) {
             files.add(splitIn[i]);
-            index.put(splitIn[i], false);
           }
           try {
             fileLocations.remove(port);
@@ -162,7 +166,7 @@ public class Controller {
           for (int c = 0; c < R; c++) {
             for (Integer p : lastDStore) {
               try {
-                if (fileLocations.get(p).size() <= Math.floor(balanceNumber) && fileLocations.get(p).size() <= Math.ceil(balanceNumber) && !fileLocations.get(p).contains(fileName)) {
+                if (fileLocations.get(p).size() <= Math.floor(balanceNumber) && fileLocations.get(p).size() +1 <= Math.ceil(balanceNumber) && !fileLocations.get(p).contains(fileName)) {
                   fileLocations.get(p).add(fileName);
                   lastDStore.remove(p);
                   lastDStore.add(p);  
@@ -311,7 +315,6 @@ public class Controller {
     while (index.contains(true)) {}
     balancing = true;
     if (dstores.size() >= R) {
-      index.clear();
       for (Integer s : dstores.keySet()) {
         sendMsg(dstores.get(s), "LIST");
       }
@@ -336,76 +339,81 @@ public class Controller {
             }
           }
 
-          for (Integer d : dstores.keySet()) {
-            Hashtable<String, ArrayList<Integer>> send = new Hashtable<>();
-            ArrayList<String> toRemove = new ArrayList<>();
-            Integer count = 0;
-            for (String f : fileLocations.get(d)) {
-              if (seen.get(f) != R && balanced.contains(d)) {
-                balanced.remove(d);
-              }
-              
-              if (!balanced.containsAll(dstores.keySet())) {
-                Iterator<Integer> it = lastDStore.iterator();
-                while (it.hasNext()) {
-                  Integer dSearch = it.next();
-                  if (fileLocations.get(dSearch) != null && !d.equals(dSearch) && !balanced.contains(dSearch)) {
-                    if (((seen.get(f) == R) || seen.get(f) > R) && (fileLocations.get(d).size() - toRemove.size()) > ceil) {
-                      if (!toRemove.contains(f)) {
+          Boolean allRep = true;
+          for (Integer c : seen.values()) {
+            if (c != R) {
+              allRep = false;
+            }
+          }
+
+          if (!balanced.containsAll(dstores.keySet()) || !allRep) {
+            for (Integer d : dstores.keySet()) {
+              Hashtable<String, ArrayList<Integer>> send = new Hashtable<>();
+              ArrayList<String> toRemove = new ArrayList<>();
+              Integer count = 0;
+              for (String f : fileLocations.get(d)) {
+                if (seen.get(f) != R && balanced.contains(d)) {
+                  balanced.remove(d);
+                }
+                if (!index.keySet().contains(f)) {
+                  toRemove.add(f);
+                } else if (!balanced.containsAll(dstores.keySet())) {
+                  Iterator<Integer> it = lastDStore.iterator();
+                  while (it.hasNext()) {
+                    Integer dSearch = it.next();
+                    if (fileLocations.get(dSearch) != null && !d.equals(dSearch) && !balanced.contains(dSearch)) {
+                      if (!toRemove.contains(f) && seen.get(f) >= R && (fileLocations.get(d).size() - toRemove.size()) > ceil && !fileLocations.get(dSearch).contains(f) && fileLocations.get(dSearch).size() < ceil) {
                         toRemove.add(f);
                         seen.put(f, seen.get(f)-1);
                       }
-                    }
-                    if (seen.get(f) < R) {
-                      if (!fileLocations.get(dSearch).contains(f) && (fileLocations.get(dSearch).size() < ceil || !it.hasNext())) {
-                        fileLocations.get(dSearch).add(f);
-                        seen.put(f, seen.get(f) + 1);
-                        ArrayList<Integer> tempStoreList = send.get(f);
-                        if (tempStoreList != null) {
-                          tempStoreList.add(dSearch);
-                          send.put(f, tempStoreList);
-                        } else {
-                          tempStoreList = new ArrayList<>();
-                          tempStoreList.add(dSearch); 
-                          send.put(f, tempStoreList);
+                      if (seen.get(f) < R) {
+                        if (!fileLocations.get(dSearch).contains(f) && (fileLocations.get(dSearch).size() < ceil || !it.hasNext())) {
+                          fileLocations.get(dSearch).add(f);
+                          seen.put(f, seen.get(f) + 1);
+                          ArrayList<Integer> tempStoreList = send.get(f);
+                          if (tempStoreList != null) {
+                            tempStoreList.add(dSearch);
+                            send.put(f, tempStoreList);
+                          } else {
+                            tempStoreList = new ArrayList<>();
+                            tempStoreList.add(dSearch); 
+                            send.put(f, tempStoreList);
+                          }
+                          
                         }
-                        
-                      }
-                      if (fileLocations.get(dSearch).size() >= floor && fileLocations.get(dSearch).size() <= ceil && !balanced.contains(dSearch)) {
-                        balanced.add(dSearch);
                       }
                     }
                   }
                 }
+                if (fileLocations.get(d).size()  - toRemove.size() >= floor && fileLocations.get(d).size() <= ceil && seen.get(f) == R && !balanced.contains(d)) {
+                  balanced.add(d);
+                }
               }
-              if (seen.get(f) == R && !balanced.contains(d)) {
-                balanced.add(d);
-              }
-            }
 
-            String message = "";
-            for (String f : send.keySet()) {
-              count += 1;
-              String files = "";
-              message += " " + f;
-              Integer noDStores = 0;
-              for (Integer ds : send.get(f)) {
-                noDStores += 1;
-                files += " " + ds;
+              String message = "";
+              for (String f : send.keySet()) {
+                count += 1;
+                String files = "";
+                message += " " + f;
+                Integer noDStores = 0;
+                for (Integer ds : send.get(f)) {
+                  noDStores += 1;
+                  files += " " + ds;
+                }
+                message += " " + noDStores + files;
               }
-              message += " " + noDStores + files;
-            }
-            Integer countR = 0;
-            String files = "";
-            for (String r : toRemove) {
-              countR += 1;
-              files += " " + r;
-            }
-            message += " " + countR + files;
-            if (!send.isEmpty() || !toRemove.isEmpty()) {
-              rebaCompLatch = new CountDownLatch(1);
-              sendMsg(dstores.get(d), "REBALANCE " + count + message);
-              if (rebaCompLatch.await(timeout, TimeUnit.MILLISECONDS)) {}
+              Integer countR = 0;
+              String files = "";
+              for (String r : toRemove) {
+                countR += 1;
+                files += " " + r;
+              }
+              message += " " + countR + files;
+              if (!send.isEmpty() || !toRemove.isEmpty()) {
+                rebaCompLatch = new CountDownLatch(1);
+                sendMsg(dstores.get(d), "REBALANCE " + count + message);
+                if (rebaCompLatch.await(timeout, TimeUnit.MILLISECONDS)) {}
+              }
             }
           }       
         }
