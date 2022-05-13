@@ -2,6 +2,7 @@ import java.io.*;
 import java.net.*;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.ConcurrentModificationException;
 import java.util.HashSet;
 import java.util.Hashtable;
 import java.util.Iterator;
@@ -10,6 +11,8 @@ import java.util.TimerTask;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
+
+import javax.swing.CellEditor;
 
 public class Controller {
 
@@ -93,19 +96,18 @@ public class Controller {
                   }
                 }
                 
-              } catch(Exception e) {
-                logger.info(e.getMessage());
-                try {
-                  if (port != 0) {
-                    dstores.remove(port);
-                    fileLocations.remove(port);
-                    lastDStore.remove(port);
-                    logger.info("Removed a Dstore");
-                  } else {
-                    logger.info("Connection closed");
+              } catch(IOException e) {
+                logger.info("error " + e.getMessage());
+                if (port != 0) {
+                  dstores.remove(port);
+                  fileLocations.remove(port);
+                  lastDStore.remove(lastDStore.indexOf(port));
+                  logger.info("Removed a Dstore");
+                  if (dstores.isEmpty()) {
+                    index.clear();
+                    fileSizes.clear();
                   }
-                  client.close();
-                } catch (Exception ee) {}
+                }
               }
             }
           }).start();
@@ -125,9 +127,7 @@ public class Controller {
           for (int i = 1 ; i < splitIn.length; i++ ) {
             files.add(splitIn[i]);
           }
-          try {
-            fileLocations.remove(port);
-          } catch (Exception e) {}
+          fileLocations.remove(port);
 
           fileLocations.put(port, files);
           logger.info("Files " + files + " added for " + port);
@@ -159,24 +159,36 @@ public class Controller {
         } else {
           index.put(fileName, true);
           fileSizes.put(fileName, fileSize);
-          double balanceNumber = (R * index.size())/dstores.size();
           String toSend = "STORE_TO";
-
-          for (int c = 0; c < R; c++) {
-            for (Integer p : lastDStore) {
+          
+          Integer foundC = 0;
+          Integer last = 0;
+          Collections.shuffle(lastDStore);
+          for (int c = 0; c < R; c=foundC) {
+            
+            try {
               try {
-                if ((fileLocations.get(p).size() == Math.floor(balanceNumber) || fileLocations.get(p).size() < Math.ceil(balanceNumber))&& !fileLocations.get(p).contains(fileName)) {
-                  fileLocations.get(p).add(fileName);
-                  lastDStore.remove(p);
-                  lastDStore.add(p);  
-                  toSend += " " + p;
-                  logger.info("File " + fileName + " added to " + p);
-                  break;
+                for (Integer p : lastDStore) {
+                  double balanceNumber = (R * index.size())/dstores.size();
+                  double prevBal = (R * index.size()-1)/dstores.size();
+                  double floor = Math.floor(balanceNumber);
+                  double ceil = Math.ceil(balanceNumber);
+                  if (((floor == Math.ceil(prevBal) && fileLocations.get(p).size() == floor) || (fileLocations.get(p).size() < floor || (fileLocations.get(p).size() < ceil && (last == foundC)))) && !fileLocations.get(p).contains(fileName) ) {
+                    fileLocations.get(p).add(fileName);
+                    toSend += " " + p;
+                    logger.info("File " + fileName + " added to " + p);
+                    last = foundC;
+                    foundC += 1;
+                    break;
+                  }
                 }
-              } catch (Exception e) {
+              } catch (ConcurrentModificationException e) {
                 logger.info("error " + e.getMessage());
               }
+            } catch (NullPointerException e) {
+              break;
             }
+            
           }
 
           CountDownLatch countDown = new CountDownLatch(R);
@@ -195,28 +207,28 @@ public class Controller {
               index.remove(fileName);
               locksS.remove(fileName);
             }
-          } catch (Exception e) {logger.info("error " + e.getMessage());}
+          } catch (InterruptedException | NullPointerException e) {logger.info("error " + e.getMessage());}
         }
         break;
       case "STORE_ACK":
         try {
           locksS.get(splitIn[1]).countDown();
           logger.info("ACK S " + splitIn[1] + " decremented");
-        } catch (Exception e) {logger.info("error " + e.getMessage());}
+        } catch (NullPointerException e) {logger.info("error " + e.getMessage());}
         break;
       case "REMOVE_ACK":
         try {
           locksR.get(splitIn[1]).countDown();
           fileLocations.get(port).remove(splitIn[1]);
           logger.info("ACK R " + splitIn[1] + " decremented");
-        } catch (Exception e) {logger.info("error " + e.getMessage());}
+        } catch (NullPointerException e) {logger.info("error " + e.getMessage());}
         break;
       case "ERROR_FILE_DOES_NOT_EXIST":
         try {
           locksR.get(splitIn[1]).countDown();
           fileLocations.get(port).remove(splitIn[1]);
           logger.info("ACK R " + splitIn[1] + " decremented file does not exist");
-        } catch (Exception e) {logger.info("error " + e.getMessage());}
+        } catch (NullPointerException e) {logger.info("error " + e.getMessage());}
         break;
       case "LOAD":
       case "RELOAD":
@@ -274,7 +286,7 @@ public class Controller {
                   logger.info("REMOVE " + fileName +" timeout " + countDown.getCount());
                   locksR.remove(fileName);
                 }
-              } catch (Exception e) {logger.info("error " + e.getMessage());}
+              } catch (InterruptedException | NullPointerException e) {logger.info("error " + e.getMessage());}
             } else {
               sendMsg(client, "ERROR_FILE_DOES_NOT_EXIST");
             }
@@ -308,120 +320,124 @@ public class Controller {
   }
 
   /**
-   * Controlls the Dstores when rebalencing
+   * Controls the Dstores when rebalencing
    */
-  //look to fill not to be filled
   public void rebalance() {
-    while (index.contains(true)) {}
-    balancing = true;
-    if (dstores.size() >= R || index.size() != 0) {
-      for (Integer s : dstores.keySet()) {
-        sendMsg(dstores.get(s), "LIST");
-      }
-      rebaLatch = new CountDownLatch(dstores.size());
-      try {
-        if (rebaLatch.await(timeout, TimeUnit.MILLISECONDS)) {
-          double balanceNumber = (R * index.size())/dstores.size();
-          double floor = Math.floor(balanceNumber);
-          double ceil = Math.ceil(balanceNumber);
-          Hashtable<String, Integer> seen = new Hashtable<>();  
-          ArrayList<Integer> balanced = new ArrayList<>();
-          for (Integer d : fileLocations.keySet()) {
-            if (fileLocations.get(d).size() >= floor && fileLocations.get(d).size() <= ceil) {
-              balanced.add(d);
-            }
-            for (String f : fileLocations.get(d)) {
-              if (seen.get(f) != null) {
-                seen.put(f, seen.get(f) + 1);
-              } else {
-                seen.put(f, 1);
+    if (index.size() != 0) {
+      while (index.contains(true)) {}
+      balancing = true;
+      if (dstores.size() >= R) {
+        for (Integer s : dstores.keySet()) {
+          sendMsg(dstores.get(s), "LIST");
+        }
+        rebaLatch = new CountDownLatch(dstores.size());
+        try {
+          if (rebaLatch.await(timeout, TimeUnit.MILLISECONDS)) {
+            double balanceNumber = (R * index.size())/dstores.size();
+            double floor = Math.floor(balanceNumber);
+            double ceil = Math.ceil(balanceNumber);
+            Hashtable<String, Integer> seen = new Hashtable<>();  
+            ArrayList<Integer> balanced = new ArrayList<>();
+            for (Integer d : fileLocations.keySet()) {
+              if (fileLocations.get(d).size() >= floor && fileLocations.get(d).size() <= ceil) {
+                balanced.add(d);
+              }
+              for (String f : fileLocations.get(d)) {
+                if (seen.get(f) != null) {
+                  seen.put(f, seen.get(f) + 1);
+                } else {
+                  seen.put(f, 1);
+                }
               }
             }
-          }
 
-          Boolean allRep = true;
-          for (Integer c : seen.values()) {
-            if (c != R) {
-              allRep = false;
+            Boolean allRep = true;
+            for (String c : seen.keySet()) {
+              if (seen.get(c) != R) {
+                if (seen.get(c) == 0) {index.remove(c);}
+                allRep = false;
+              }
             }
-          }
 
-          if (!balanced.containsAll(dstores.keySet()) || !allRep) {
-            for (Integer d : dstores.keySet()) {
-              Hashtable<String, ArrayList<Integer>> send = new Hashtable<>();
-              ArrayList<String> toRemove = new ArrayList<>();
-              Integer count = 0;
-              for (String f : fileLocations.get(d)) {
-                if (seen.get(f) != R && balanced.contains(d)) {
-                  balanced.remove(d);
-                }
-                if (!index.keySet().contains(f)) {
-                  toRemove.add(f);
-                } else if (!balanced.containsAll(dstores.keySet())) {
-                  Collections.shuffle(lastDStore);
-                  Iterator<Integer> it = lastDStore.iterator();
-                  while (it.hasNext()) {
-                    Integer dSearch = it.next();
-                    if (fileLocations.get(dSearch) != null && !d.equals(dSearch)) {
-                      if (!toRemove.contains(f) && seen.get(f) >= R && (fileLocations.get(d).size() - toRemove.size()) > ceil && !fileLocations.get(dSearch).contains(f) && fileLocations.get(dSearch).size() < ceil) {
-                        toRemove.add(f);
-                        seen.put(f, seen.get(f)-1);
-                      }
-                      if (seen.get(f) < R) {
-                        if (!fileLocations.get(dSearch).contains(f) && (fileLocations.get(dSearch).size() < ceil || !it.hasNext())) {
-                          fileLocations.get(dSearch).add(f);
-                          seen.put(f, seen.get(f) + 1);
-                          ArrayList<Integer> tempStoreList = send.get(f);
-                          if (tempStoreList != null) {
-                            tempStoreList.add(dSearch);
-                            send.put(f, tempStoreList);
-                          } else {
-                            tempStoreList = new ArrayList<>();
-                            tempStoreList.add(dSearch); 
-                            send.put(f, tempStoreList);
+            if (!balanced.containsAll(dstores.keySet()) || !allRep) {
+              ArrayList<Integer> tempLast = lastDStore;
+              for (Integer d : dstores.keySet()) {
+                Hashtable<String, ArrayList<Integer>> send = new Hashtable<>();
+                ArrayList<String> toRemove = new ArrayList<>();
+                Integer count = 0;
+                Integer dSize = fileLocations.get(d).size();
+                for (String f : fileLocations.get(d)) {
+                  if (seen.get(f) != R && balanced.contains(d)) {
+                    balanced.remove(d);
+                  }
+                  if (!index.keySet().contains(f)) {
+                    toRemove.add(f);
+                  } else if (!balanced.containsAll(dstores.keySet())) {
+                    Collections.shuffle(tempLast);
+                    Iterator<Integer> it = tempLast.iterator();
+                    while (it.hasNext()) {
+                      Integer dSearch = it.next();
+                      if (fileLocations.get(dSearch) != null && !d.equals(dSearch)) {
+                        if (!toRemove.contains(f) && seen.get(f) >= R && (dSize - toRemove.size()) > ceil && !fileLocations.get(dSearch).contains(f) && fileLocations.get(dSearch).size() < ceil) {
+                          toRemove.add(f);
+                          seen.put(f, seen.get(f)-1);
+                        }
+                        if (seen.get(f) < R) {
+                          if (!fileLocations.get(dSearch).contains(f) && (fileLocations.get(dSearch).size() < ceil || !it.hasNext())) {
+                            fileLocations.get(dSearch).add(f);
+                            seen.put(f, seen.get(f) + 1);
+                            ArrayList<Integer> tempStoreList = send.get(f);
+                            if (tempStoreList != null) {
+                              tempStoreList.add(dSearch);
+                              send.put(f, tempStoreList);
+                            } else {
+                              tempStoreList = new ArrayList<>();
+                              tempStoreList.add(dSearch); 
+                              send.put(f, tempStoreList);
+                            }
+                            
                           }
-                          
                         }
                       }
                     }
                   }
+                  if (fileLocations.get(d).size()  - toRemove.size() >= floor && fileLocations.get(d).size() <= ceil && seen.get(f) == R && !balanced.contains(d)) {
+                    balanced.add(d);
+                  }
                 }
-                if (fileLocations.get(d).size()  - toRemove.size() >= floor && fileLocations.get(d).size() <= ceil && seen.get(f) == R && !balanced.contains(d)) {
-                  balanced.add(d);
-                }
-              }
 
-              String message = "";
-              for (String f : send.keySet()) {
-                count += 1;
-                String files = "";
-                message += " " + f;
-                Integer noDStores = 0;
-                for (Integer ds : send.get(f)) {
-                  noDStores += 1;
-                  files += " " + ds;
+                String message = "";
+                for (String f : send.keySet()) {
+                  count += 1;
+                  String files = "";
+                  message += " " + f;
+                  Integer noDStores = 0;
+                  for (Integer ds : send.get(f)) {
+                    noDStores += 1;
+                    files += " " + ds;
+                  }
+                  message += " " + noDStores + files;
                 }
-                message += " " + noDStores + files;
+                Integer countR = 0;
+                String files = "";
+                for (String r : toRemove) {
+                  countR += 1;
+                  files += " " + r;
+                }
+                message += " " + countR + files;
+                if (!send.isEmpty() || !toRemove.isEmpty()) {
+                  rebaCompLatch = new CountDownLatch(1);
+                  sendMsg(dstores.get(d), "REBALANCE " + count + message);
+                  if (rebaCompLatch.await(timeout, TimeUnit.MILLISECONDS)) {}
+                }
               }
-              Integer countR = 0;
-              String files = "";
-              for (String r : toRemove) {
-                countR += 1;
-                files += " " + r;
-              }
-              message += " " + countR + files;
-              if (!send.isEmpty() || !toRemove.isEmpty()) {
-                rebaCompLatch = new CountDownLatch(1);
-                sendMsg(dstores.get(d), "REBALANCE " + count + message);
-                if (rebaCompLatch.await(timeout, TimeUnit.MILLISECONDS)) {}
-              }
-            }
-          }       
-        }
-      }catch (Exception e) {logger.info("error " + e.getMessage());}
-      
+            }       
+          }
+        }catch (NullPointerException | InterruptedException e) {logger.info("error " + e.getMessage());}
+        
+      }
+      balancing = false;
     }
-    balancing = false;
   }
 }
 
