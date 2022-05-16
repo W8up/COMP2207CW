@@ -28,12 +28,14 @@ public class Dstore {
     ArrayList<String> filesStored = new ArrayList<>();
     Dstore dstore = new Dstore(port, cport, timeout, fileFolder, filesStored);
   }
+
   /**
    * Creates a Dstore to store files
-   * @param port to host on
-   * @param cport to connect to
-   * @param timeout duration ms
-   * @param fileFolder location to store files at
+   * 
+   * @param port        to host on
+   * @param cport       to connect to
+   * @param timeout     duration ms
+   * @param fileFolder  location to store files at
    * @param filesStored files currently stored
    */
   public Dstore(int port, int cport, int timeout, String fileFolder, ArrayList<String> filesStored) {
@@ -49,29 +51,31 @@ public class Dstore {
       for (File f : files) {
         f.delete();
       }
-    } catch (Exception e) {logger.info("error " + e.getMessage());}
+    } catch (Exception e) {
+      logger.info("error " + e.getMessage());
+    }
 
-    new Thread(new Runnable(){
+    new Thread(new Runnable() {
       public void run() {
         ServerComms();
       }
     }).start();
 
-    try{
+    try {
       ServerSocket ss = new ServerSocket(port);
-      for(;;){
-        try{
+      for (;;) {
+        try {
           final Socket client = ss.accept();
           client.setSoTimeout(timeout);
           logger.info("New connection");
-          new Thread(new Runnable(){
+          new Thread(new Runnable() {
             public void run() {
               try {
                 BufferedReader in = new BufferedReader(
-                new InputStreamReader(client.getInputStream()));
+                    new InputStreamReader(client.getInputStream()));
                 String line;
                 logger.info("msg");
-                while((line = in.readLine()) != null) {
+                while ((line = in.readLine()) != null) {
                   logger.info(line + " received");
                   String[] splitIn = line.split(" ");
                   String command = splitIn[0];
@@ -87,19 +91,21 @@ public class Dstore {
                       InputStream fileInStream = client.getInputStream();
                       logger.info("filename: " + fileName);
                       sendMsg(client, "ACK");
-                      while ((buflen=fileInStream.read(fileBuffer)) != -1){
-                        out.write(fileBuffer,0,buflen);
+                      while ((buflen = fileInStream.read(fileBuffer)) != -1) {
+                        out.write(fileBuffer, 0, buflen);
                       }
-                      filesStored.add(fileName);
-                      fileSizes.put(fileName, size);
                       if (command.equals("STORE")) {
                         sendMsg(toServer, "STORE_ACK " + fileName);
                       }
+                      filesStored.add(fileName);
+                      fileSizes.put(fileName, size);
                       fileInStream.close();
                       out.close();
                       break;
                     case "LOAD_DATA":
-                      if (!filesStored.contains(splitIn[1])) {client.close();}
+                      if (!filesStored.contains(splitIn[1])) {
+                        client.close();
+                      }
                       sendFile(client, splitIn[1]);
                       break;
                     default:
@@ -122,20 +128,20 @@ public class Dstore {
 
   private void ServerComms() {
 
-    try{
-      //Sending
-      toServer = new Socket(InetAddress.getLocalHost(),cport);
-      sendMsg(toServer, "JOIN "+ port);
+    try {
+      // Sending
+      toServer = new Socket(InetAddress.getLocalHost(), cport);
+      sendMsg(toServer, "JOIN " + port);
 
-      //Receiving
-      try{
-        for(;;){
-          try{
+      // Receiving
+      try {
+        for (;;) {
+          try {
             BufferedReader in = new BufferedReader(
-            new InputStreamReader(toServer.getInputStream()));
+                new InputStreamReader(toServer.getInputStream()));
             String line;
-            while((line = in.readLine()) != null) {
-              logger.info(line+" received");
+            while ((line = in.readLine()) != null) {
+              logger.info(line + " received");
               String[] splitIn = line.split(" ");
               if (splitIn[0].equals("LIST")) {
                 String msgToSend = "LIST";
@@ -144,12 +150,12 @@ public class Dstore {
                 }
                 sendMsg(toServer, msgToSend);
 
-                //REMOVE
+                // REMOVE
               } else if (splitIn[0].equals("REMOVE")) {
                 String fileName = splitIn[1];
                 if (filesStored.contains(fileName)) {
                   File toRemove = new File(dir, fileName);
-                  
+
                   if (toRemove.delete()) {
                     filesStored.remove(fileName);
                     logger.info("File " + fileName + " removed");
@@ -182,21 +188,23 @@ public class Dstore {
                     Socket dSock = new Socket(InetAddress.getLocalHost(), d);
                     sendMsg(dSock, "REBALANCE_STORE " + f + " " + fs);
                     wait = new CountDownLatch(1);
-                    new Thread(new Runnable(){
+                    new Thread(new Runnable() {
                       public void run() {
-                        try{
+                        try {
                           BufferedReader in2 = new BufferedReader(
-                          new InputStreamReader(dSock.getInputStream()));
+                              new InputStreamReader(dSock.getInputStream()));
                           String line2;
                           logger.info("msg");
-                          while((line2 = in2.readLine()) != null) {
+                          while ((line2 = in2.readLine()) != null) {
                             logger.info(line2 + " received");
                             String[] splitIn2 = line2.split(" ");
                             if (splitIn2[0].equals("ACK")) {
                               wait.countDown();
                             }
                           }
-                        } catch (Exception e) {logger.info("error: " + e.getMessage());}
+                        } catch (Exception e) {
+                          logger.info("error: " + e.getMessage());
+                        }
                       }
                     }).start();
                     if (wait.await(timeout, TimeUnit.MILLISECONDS)) {
@@ -210,7 +218,7 @@ public class Dstore {
                 for (int c = 0; c < noToRemove; c++) {
                   if (filesStored.contains(splitIn[offset])) {
                     File toRemove = new File(dir, splitIn[offset]);
-                    
+
                     if (toRemove.delete()) {
                       filesStored.remove(splitIn[offset]);
                       logger.info("File " + splitIn[offset] + " removed");
@@ -222,23 +230,31 @@ public class Dstore {
                 }
                 sendMsg(toServer, "REBALANCE_COMPLETE");
                 logger.info("End");
-                
+
               } else {
-                logger.info("Malformed message recived: " +line);
+                logger.info("Malformed message recived: " + line);
               }
             }
-          }catch(Exception e){logger.info("error "+e);}
+          } catch (Exception e) {
+            logger.info("error " + e);
+          }
         }
-      }catch(Exception e){logger.info("error "+e);}
-    }catch(Exception e){logger.info("error"+e);}
+      } catch (Exception e) {
+        logger.info("error " + e);
+      }
+    } catch (Exception e) {
+      logger.info("error" + e);
+    }
   }
 
   private void sendMsg(Socket socket, String msg) {
-    try{
+    try {
       PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
       out.println(msg);
-      logger.info("TCP message "+msg+" sent");
-    }catch(Exception e){logger.info("error"+e);}
+      logger.info("TCP message " + msg + " sent");
+    } catch (Exception e) {
+      logger.info("error" + e);
+    }
   }
 
   private void sendFile(Socket socket, String fileName) {
@@ -252,6 +268,8 @@ public class Dstore {
       dataOut.write(fileContent);
       logger.info(fileName + " file sent");
       inputStream.close();
-    } catch (Exception e) {logger.info("error " + e.getMessage());}
+    } catch (Exception e) {
+      logger.info("error " + e.getMessage());
+    }
   }
 }
