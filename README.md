@@ -1,6 +1,6 @@
 # COMP2207CW  
 
-Distributes file system
+Distributed file system
 
 # Commands  
 
